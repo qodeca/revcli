@@ -1,7 +1,9 @@
 import type { Page } from "playwright";
 import type { ParsedUrl } from "../utils/url.js";
+import { extractPlaceIdFromUrl } from "../utils/url.js";
 import type { Business } from "../core/schema.js";
 import { logger } from "../utils/logger.js";
+import { SELECTORS } from "./selectors.js";
 
 const SORT_OPTIONS: Record<string, number> = {
   relevant: 0,
@@ -15,45 +17,57 @@ export async function navigateToReviews(
   parsed: ParsedUrl,
   sortOrder: string,
 ): Promise<Omit<Business, "scrapeDate">> {
-  // Handle browser dialogs
   page.on("dialog", async (dialog) => {
     await dialog.accept();
   });
 
-  // Navigate – use networkidle for short URLs that redirect
-  const waitUntil = parsed.isShortUrl ? "networkidle" : "domcontentloaded";
-  logger.debug(`Navigating to ${parsed.url}`);
-  await page.goto(parsed.url, { waitUntil, timeout: 30000 });
+  // Prepare URL with hl=en to avoid double navigation
+  const targetUrl = appendHlParam(parsed.url);
 
-  // Handle Google consent page (redirects to consent.google.com)
+  const waitUntil = parsed.isShortUrl ? "networkidle" : "domcontentloaded";
+  logger.debug(`Navigating to ${targetUrl}`);
+  await page.goto(targetUrl, { waitUntil, timeout: 30000 });
+
+  // Handle Google consent page
   await handleConsent(page);
 
-  // Force English locale if not already set by appending hl=en
-  await forceEnglishLocale(page);
+  // Force English locale if consent redirect stripped hl=en
+  await ensureEnglishLocale(page);
 
   // Wait for the place panel to load
   await page.waitForSelector("h1", { timeout: 15000 });
 
-  // Update placeId from the resolved URL (useful for short URLs)
+  // Extract placeId from the resolved URL (useful for short URLs)
   const resolvedUrl = page.url();
-  const placeIdFromUrl = extractPlaceIdFromResolvedUrl(resolvedUrl);
+  const placeIdFromUrl = extractPlaceIdFromUrl(resolvedUrl);
 
-  // Extract business information from the place panel
   const businessInfo = await extractBusinessInfo(page, {
     ...parsed,
     placeId: parsed.placeId ?? placeIdFromUrl,
     url: resolvedUrl,
   });
 
-  // Click on the "Reviews" tab using role selector (locale-independent)
   await openReviewsTab(page);
 
-  // Set sort order
   if (sortOrder !== "relevant") {
     await setSortOrder(page, sortOrder);
   }
 
   return businessInfo;
+}
+
+function appendHlParam(url: string): string {
+  // Short URLs can't have params appended – they redirect
+  if (url.includes("maps.app.goo.gl")) return url;
+  try {
+    const u = new URL(url);
+    if (!u.searchParams.has("hl")) {
+      u.searchParams.set("hl", "en");
+    }
+    return u.toString();
+  } catch {
+    return url;
+  }
 }
 
 async function handleConsent(page: Page): Promise<void> {
@@ -62,14 +76,13 @@ async function handleConsent(page: Page): Promise<void> {
 
   logger.debug("Handling Google consent page...");
 
-  // Try multiple consent button selectors (varies by locale)
   const consentSelectors = [
     'button:has-text("Accept all")',
-    'button:has-text("Zaakceptuj wszystko")', // Polish
-    'button:has-text("Alle akzeptieren")', // German
-    'button:has-text("Accepter tout")', // French
-    'button:has-text("Aceptar todo")', // Spanish
-    'form[action*="consent"] button:nth-child(2)', // Fallback: second button is usually "Accept"
+    'button:has-text("Zaakceptuj wszystko")',
+    'button:has-text("Alle akzeptieren")',
+    'button:has-text("Accepter tout")',
+    'button:has-text("Aceptar todo")',
+    'form[action*="consent"] button:nth-child(2)',
     'button[aria-label*="Accept"], button[aria-label*="consent"]',
   ];
 
@@ -79,7 +92,6 @@ async function handleConsent(page: Page): Promise<void> {
       if (await button.isVisible({ timeout: 1000 })) {
         await button.click();
         logger.debug("Accepted cookie consent");
-        // Wait for redirect back to Maps
         await page.waitForURL(/google\.[a-z.]+\/maps/, { timeout: 15000 });
         await page.waitForLoadState("domcontentloaded");
         return;
@@ -92,13 +104,10 @@ async function handleConsent(page: Page): Promise<void> {
   logger.warn("Could not find consent button – proceeding anyway");
 }
 
-async function forceEnglishLocale(page: Page): Promise<void> {
+async function ensureEnglishLocale(page: Page): Promise<void> {
   const currentUrl = page.url();
-
-  // If already has hl=en, skip
   if (currentUrl.includes("hl=en")) return;
 
-  // Add or replace hl parameter
   const url = new URL(currentUrl);
   url.searchParams.set("hl", "en");
 
@@ -109,26 +118,18 @@ async function forceEnglishLocale(page: Page): Promise<void> {
   });
 }
 
-function extractPlaceIdFromResolvedUrl(url: string): string | null {
-  const placeIdMatch = url.match(/!1s(0x[0-9a-f]+:0x[0-9a-f]+)/);
-  if (placeIdMatch) return placeIdMatch[1];
-
-  const ftidMatch = url.match(/ftid=(0x[0-9a-f]+:0x[0-9a-f]+)/);
-  if (ftidMatch) return ftidMatch[1];
-
-  return null;
-}
-
 async function extractBusinessInfo(
   page: Page,
   parsed: ParsedUrl,
 ): Promise<Omit<Business, "scrapeDate">> {
+  const addressSelector = SELECTORS.addressButton;
+  const tabSelector = SELECTORS.tab;
+
   return await page.evaluate(
-    ({ placeId, url }) => {
+    ({ placeId, url, addressSel, tabSel }) => {
       const name =
         document.querySelector("h1")?.textContent?.trim() ?? "Unknown";
 
-      // Overall rating – look for the star rating display
       const ratingEl = document.querySelector(
         'div[role="img"][aria-label*="star"], span[aria-hidden="true"]',
       );
@@ -140,7 +141,6 @@ async function extractBusinessInfo(
         if (ratingMatch) {
           rating = parseFloat(ratingMatch[1]);
         } else {
-          // Try textContent for aria-hidden spans
           const text = ratingEl.textContent?.trim();
           if (text && /^\d+\.?\d*$/.test(text)) {
             rating = parseFloat(text);
@@ -148,13 +148,11 @@ async function extractBusinessInfo(
         }
       }
 
-      // Total review count from the reviews tab or rating area
       let totalReviews: number | null = null;
-      const tabButtons = document.querySelectorAll('button[role="tab"]');
+      const tabButtons = document.querySelectorAll(tabSel);
       for (const tab of tabButtons) {
         const text = tab.textContent ?? "";
-        // Match "Reviews" tab which often contains count like "Reviews (1,234)"
-        if (text.includes("Reviews") || text.includes("review")) {
+        if (/review/i.test(text)) {
           const countMatch = text.match(/([\d,]+)/);
           if (countMatch) {
             totalReviews = parseInt(countMatch[1].replace(/,/g, ""));
@@ -162,7 +160,6 @@ async function extractBusinessInfo(
         }
       }
 
-      // Fallback: look for review count in the header area
       if (totalReviews === null) {
         const allText = document.body.innerText;
         const countMatch = allText.match(/([\d,]+)\s*reviews?/i);
@@ -171,10 +168,7 @@ async function extractBusinessInfo(
         }
       }
 
-      // Address
-      const addressEl = document.querySelector(
-        'button[data-item-id="address"] div.fontBodyMedium, [data-item-id="address"]',
-      );
+      const addressEl = document.querySelector(addressSel);
       const address = addressEl?.textContent?.trim() ?? null;
 
       return {
@@ -186,26 +180,38 @@ async function extractBusinessInfo(
         totalReviews,
       };
     },
-    { placeId: parsed.placeId, url: parsed.url },
+    {
+      placeId: parsed.placeId,
+      url: parsed.url,
+      addressSel: addressSelector,
+      tabSel: tabSelector,
+    },
   );
 }
 
 async function openReviewsTab(page: Page): Promise<void> {
-  // Wait for tabs to be available (they may take time after locale change)
-  await page.waitForSelector('button[role="tab"]', { timeout: 10000 });
+  await page.waitForSelector(SELECTORS.tab, { timeout: 10000 });
   await page.waitForTimeout(1000);
 
-  const tabs = page.locator('button[role="tab"]');
+  // Content-based tab detection – find the tab containing "Review" text
+  const tabs = page.locator(SELECTORS.tab);
   const tabCount = await tabs.count();
+  let clicked = false;
 
-  if (tabCount >= 2) {
-    const reviewsTab = tabs.nth(1);
-    const tabText = await reviewsTab.textContent();
-    logger.debug(`Clicking tab: "${tabText?.trim()}"`);
-    await reviewsTab.click();
-  } else {
+  for (let i = 0; i < tabCount; i++) {
+    const text = (await tabs.nth(i).textContent()) ?? "";
+    if (/review/i.test(text)) {
+      logger.debug(`Clicking tab: "${text.trim()}"`);
+      await tabs.nth(i).click();
+      clicked = true;
+      break;
+    }
+  }
+
+  if (!clicked) {
+    // Fallback for non-English locale remnants
     const reviewsTab = page.locator(
-      'button:has-text("Reviews"), button:has-text("Opinie"), button:has-text("review")',
+      'button:has-text("Reviews"), button:has-text("Opinie"), button:has-text("Bewertungen")',
     );
     try {
       await reviewsTab.first().click({ timeout: 5000 });
@@ -216,8 +222,7 @@ async function openReviewsTab(page: Page): Promise<void> {
     }
   }
 
-  // Wait for review cards to appear with longer timeout
-  await page.waitForSelector("div.jftiEf", { timeout: 15000 });
+  await page.waitForSelector(SELECTORS.reviewCard, { timeout: 15000 });
   await page.waitForTimeout(1000);
   logger.debug("Reviews panel loaded");
 }
@@ -230,26 +235,16 @@ async function setSortOrder(page: Page, sortOrder: string): Promise<void> {
   }
 
   try {
-    // Click the sort dropdown – look for a button with "Sort" or sort-related aria-label
-    // Also try the menu button near reviews that controls sorting
-    const sortButton = page.locator(
-      'button[aria-label*="Sort"], button[aria-label*="sort"], button[data-value="Sort"], button:has-text("Most relevant"), button:has-text("Newest")',
-    );
+    const sortButton = page.locator(SELECTORS.sortButton);
     await sortButton.first().click({ timeout: 5000 });
 
-    // Wait for dropdown menu
-    await page.waitForSelector('div[role="menuitemradio"]', {
-      timeout: 3000,
-    });
+    await page.waitForSelector(SELECTORS.sortMenuItem, { timeout: 3000 });
 
-    // Click the desired sort option by index
-    const menuItems = page.locator('div[role="menuitemradio"]');
+    const menuItems = page.locator(SELECTORS.sortMenuItem);
     const count = await menuItems.count();
     if (sortIndex < count) {
       await menuItems.nth(sortIndex).click();
       logger.debug(`Sort order set to: ${sortOrder}`);
-
-      // Wait for reviews to reload after sort change
       await page.waitForTimeout(3000);
     }
   } catch {

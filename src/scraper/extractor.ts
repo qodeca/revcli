@@ -1,5 +1,6 @@
 import type { Page } from "playwright";
 import { logger } from "../utils/logger.js";
+import { SELECTORS } from "./selectors.js";
 
 export interface RawReview {
   reviewId: string;
@@ -16,13 +17,11 @@ export interface RawReview {
 
 /**
  * Expand all truncated review texts by clicking "More" buttons.
- * Must be called before extractReviews to get full text.
  */
 export async function expandAllReviews(page: Page): Promise<void> {
   try {
-    // Google Maps uses buttons with text "More" to expand truncated reviews
     const moreButtons = page.locator(
-      'div.jftiEf button.w8nwRe, div.jftiEf button:has-text("More")',
+      `${SELECTORS.reviewCard} ${SELECTORS.expandButton}`,
     );
     const count = await moreButtons.count();
     for (let i = 0; i < count; i++) {
@@ -42,17 +41,25 @@ export async function expandAllReviews(page: Page): Promise<void> {
 
 /**
  * Extract all currently visible reviews from the DOM in a single evaluate() call.
- * Uses the exact selectors discovered from Google Maps DOM inspection:
- * - Card: div.jftiEf with data-review-id
- * - Author: div.d4r55
- * - Author URL: button[data-href*="/contrib/"] (data-href, not href)
- * - Stars: span.kvMYJc[role="img"] aria-label="N stars"
- * - Time: span.rsqaWe
- * - Text: span.wiI7pd (inside div.MyEned)
- * - Owner response: div.CDe7pd
+ * Selectors are passed as arguments to keep them centralized in selectors.ts.
  */
 export async function extractReviews(page: Page): Promise<RawReview[]> {
-  const reviews = await page.evaluate(() => {
+  const sel = {
+    card: SELECTORS.reviewCard,
+    reviewId: SELECTORS.reviewId,
+    authorName: SELECTORS.authorName,
+    authorButton: SELECTORS.authorButton,
+    stars: SELECTORS.stars,
+    timeContainer: SELECTORS.reviewTimeContainer,
+    time: SELECTORS.reviewTime,
+    text: SELECTORS.reviewText,
+    photo: SELECTORS.photoButton,
+    responseContainer: SELECTORS.ownerResponseContainer,
+    responseText: SELECTORS.ownerResponseText,
+    responseTime: SELECTORS.ownerResponseTime,
+  };
+
+  const reviews = await page.evaluate((s) => {
     const results: Array<{
       reviewId: string;
       author: string;
@@ -66,71 +73,53 @@ export async function extractReviews(page: Page): Promise<RawReview[]> {
       ownerResponseTime: string | null;
     }> = [];
 
-    const reviewCards = document.querySelectorAll("div.jftiEf");
+    const reviewCards = document.querySelectorAll(s.card);
 
     for (const card of reviewCards) {
       try {
-        // Review ID from data attribute
-        const reviewIdEl = card.querySelector("[data-review-id]");
+        const reviewIdEl = card.querySelector(s.reviewId);
         const reviewId = reviewIdEl?.getAttribute("data-review-id") ?? "";
 
-        // Author name from d4r55 class
-        const authorEl = card.querySelector("div.d4r55");
+        const authorEl = card.querySelector(s.authorName);
         const author = authorEl?.textContent?.trim() ?? "Anonymous";
 
-        // Author URL from data-href (not href) on button
-        const authorButton = card.querySelector(
-          'button[data-href*="/contrib/"]',
-        );
+        const authorButton = card.querySelector(s.authorButton);
         const authorUrl =
           authorButton?.getAttribute("data-href") ?? null;
 
-        // Rating from aria-label on stars span
-        const starsEl = card.querySelector(
-          'span.kvMYJc[role="img"]',
-        );
+        const starsEl = card.querySelector(s.stars);
         const starsLabel = starsEl?.getAttribute("aria-label") ?? "";
         const ratingMatch = starsLabel.match(/(\d)/);
         const rating = ratingMatch ? parseInt(ratingMatch[1]) : 0;
 
-        // Publish time from rsqaWe span (inside DU9Pgb, not CDe7pd)
-        const timeContainer = card.querySelector("div.DU9Pgb");
-        const timeEl = timeContainer?.querySelector("span.rsqaWe");
+        const timeContainer = card.querySelector(s.timeContainer);
+        const timeEl = timeContainer?.querySelector(s.time);
         const publishTime = timeEl?.textContent?.trim() ?? "";
 
-        // Review text from wiI7pd span inside MyEned div
-        // This is the translated text (or original if same language)
-        const textContainer = card.querySelector(
-          "div.MyEned span.wiI7pd",
-        );
+        const textContainer = card.querySelector(s.text);
         const text = textContainer?.textContent?.trim() || null;
 
-        // Original text – not directly available without clicking "See original"
-        // The card may contain a "Translated by Google" indicator
         const originalText: string | null = null;
 
-        // Photo count – look for photo buttons within the review
-        const photoButtons = card.querySelectorAll("button.Tya61d");
+        const photoButtons = card.querySelectorAll(s.photo);
         const photos = photoButtons.length;
 
-        // Owner response from CDe7pd container
-        // Response text uses div.wiI7pd (not span), time uses span.DZSIDd
-        const responseContainer = card.querySelector("div.CDe7pd");
+        const responseContainer = card.querySelector(s.responseContainer);
         let ownerResponseText: string | null = null;
         let ownerResponseTime: string | null = null;
         if (responseContainer) {
           const responseTextEl =
-            responseContainer.querySelector("div.wiI7pd");
+            responseContainer.querySelector(s.responseText);
           ownerResponseText =
             responseTextEl?.textContent?.trim() || null;
 
           const responseTimeEl =
-            responseContainer.querySelector("span.DZSIDd");
+            responseContainer.querySelector(s.responseTime);
           ownerResponseTime =
             responseTimeEl?.textContent?.trim() || null;
         }
 
-        if (rating > 0 && reviewId) {
+        if (reviewId) {
           results.push({
             reviewId,
             author,
@@ -150,7 +139,29 @@ export async function extractReviews(page: Page): Promise<RawReview[]> {
     }
 
     return results;
-  });
+  }, sel);
+
+  // Warn about potential selector staleness
+  if (reviews.length === 0) {
+    const hasContent = await page.evaluate(
+      (cardSel) => document.querySelectorAll(cardSel).length === 0
+        && document.body.innerText.length > 1000,
+      sel.card,
+    );
+    if (hasContent) {
+      logger.warn(
+        "No reviews extracted but page has content – selectors may be stale",
+      );
+    }
+  }
+
+  // Warn about reviews with unparsed ratings (likely stale stars selector)
+  const zeroRatingCount = reviews.filter((r) => r.rating === 0).length;
+  if (zeroRatingCount > 0) {
+    logger.warn(
+      `${zeroRatingCount} reviews have rating=0 – stars selector may be stale`,
+    );
+  }
 
   logger.debug(`Extracted ${reviews.length} reviews from DOM`);
   return reviews;

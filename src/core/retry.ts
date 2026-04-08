@@ -58,6 +58,9 @@ function isUnrecoverable(error: Error): boolean {
     message.includes("invalid input") ||
     message.includes("invalid url") ||
     message.includes("captcha") ||
-    message.includes("access denied")
+    message.includes("access denied") ||
+    message.includes("executable doesn't exist") ||
+    message.includes("browser has been closed") ||
+    message.includes("browsertype.launch")
   );
 }

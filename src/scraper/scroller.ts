@@ -3,6 +3,7 @@ import type { Review } from "../core/schema.js";
 import { expandAllReviews, extractReviews } from "./extractor.js";
 import { parseReview } from "./parser.js";
 import { logger } from "../utils/logger.js";
+import { SELECTORS } from "./selectors.js";
 
 export interface ScrollOptions {
   maxReviews?: number;
@@ -86,15 +87,12 @@ export async function scrollAndCollectReviews(
  * Google Maps uses a specific scrollable div for the reviews panel.
  */
 async function findScrollContainer(page: Page): Promise<string | null> {
-  const selector = await page.evaluate(() => {
-    const candidates = [
-      "div.m6QErb.DxyBCb.kA9KIf.dS8AEf",
-      'div.m6QErb[aria-label]',
-      'div[role="feed"]',
-      "div.section-scrollbox",
-    ];
+  const candidates = SELECTORS.scrollContainers;
+  const cardSelector = SELECTORS.reviewCard;
 
-    for (const sel of candidates) {
+  const selector = await page.evaluate(
+    ({ candidates: cands, cardSel }) => {
+    for (const sel of cands) {
       const el = document.querySelector(sel);
       if (el && el.scrollHeight > el.clientHeight) {
         return sel;
@@ -102,7 +100,7 @@ async function findScrollContainer(page: Page): Promise<string | null> {
     }
 
     // Fallback: find scrollable ancestor of a review card
-    const reviewCard = document.querySelector("div.jftiEf");
+    const reviewCard = document.querySelector(cardSel);
     if (!reviewCard) return null;
 
     let el: Element | null = reviewCard.parentElement;
@@ -119,7 +117,9 @@ async function findScrollContainer(page: Page): Promise<string | null> {
     }
 
     return null;
-  });
+  },
+  { candidates, cardSel: cardSelector },
+  );
 
   if (selector) {
     logger.debug(`Found scroll container: ${selector}`);

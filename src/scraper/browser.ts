@@ -44,9 +44,26 @@ export async function launchBrowser(
   return { browser, page };
 }
 
+let activeBrowser: Browser | null = null;
+
+// Clean up browser on unexpected termination
+process.on("SIGINT", async () => {
+  if (activeBrowser) {
+    await closeBrowser(activeBrowser);
+  }
+  process.exit(130);
+});
+
+export function trackBrowser(browser: Browser): void {
+  activeBrowser = browser;
+}
+
 export async function closeBrowser(browser: Browser): Promise<void> {
   try {
     await browser.close();
+    if (activeBrowser === browser) {
+      activeBrowser = null;
+    }
     logger.debug("Browser closed");
   } catch {
     // Browser may already be closed

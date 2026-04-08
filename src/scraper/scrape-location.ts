@@ -1,6 +1,6 @@
 import { parseGoogleMapsInput } from "../utils/url.js";
 import { logger } from "../utils/logger.js";
-import { launchBrowser, closeBrowser } from "./browser.js";
+import { launchBrowser, closeBrowser, trackBrowser } from "./browser.js";
 import { navigateToReviews } from "./navigator.js";
 import { scrollAndCollectReviews } from "./scroller.js";
 import type { ScrapeResult, Review } from "../core/schema.js";
@@ -19,6 +19,7 @@ export async function scrapeLocation(
   const parsed = parseGoogleMapsInput(url);
   const startTime = Date.now();
   const { browser, page } = await launchBrowser({ headed: options.headed });
+  trackBrowser(browser);
 
   try {
     const businessInfo = await navigateToReviews(page, parsed, options.sort);

@@ -55,7 +55,7 @@ export function parseGoogleMapsInput(input: string): ParsedUrl {
   );
 }
 
-function extractPlaceIdFromUrl(url: string): string | null {
+export function extractPlaceIdFromUrl(url: string): string | null {
   const ftidMatch = url.match(FTID_IN_URL);
   if (ftidMatch) return ftidMatch[1];
 
