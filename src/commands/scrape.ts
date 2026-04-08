@@ -1,6 +1,7 @@
 import { parseGoogleMapsInput } from "../utils/url.js";
 import { logger } from "../utils/logger.js";
 import { writeJson } from "../output/json.js";
+import { writeCsv } from "../output/csv.js";
 import { launchBrowser, closeBrowser } from "../scraper/browser.js";
 import { navigateToReviews } from "../scraper/navigator.js";
 import { scrollAndCollectReviews } from "../scraper/scroller.js";
@@ -69,7 +70,12 @@ export async function scrapeCommand(
     { maxRetries: 2 },
   );
 
-  await writeJson(result, options.output ?? null);
+  const outputPath = options.output ?? null;
+  if (options.format === "csv") {
+    await writeCsv(result, outputPath);
+  } else {
+    await writeJson(result, outputPath);
+  }
   logger.success(
     `Collected ${result.reviews.length} reviews in ${((Date.now() - startTime) / 1000).toFixed(1)}s`,
   );

@@ -191,19 +191,19 @@ async function extractBusinessInfo(
 }
 
 async function openReviewsTab(page: Page): Promise<void> {
-  // Use role="tab" selector – the reviews tab is always the second tab
-  // This works regardless of locale (Polish "Opinie", English "Reviews", etc.)
+  // Wait for tabs to be available (they may take time after locale change)
+  await page.waitForSelector('button[role="tab"]', { timeout: 10000 });
+  await page.waitForTimeout(1000);
+
   const tabs = page.locator('button[role="tab"]');
   const tabCount = await tabs.count();
 
   if (tabCount >= 2) {
-    // Reviews tab is typically the second tab (index 1)
     const reviewsTab = tabs.nth(1);
     const tabText = await reviewsTab.textContent();
     logger.debug(`Clicking tab: "${tabText?.trim()}"`);
     await reviewsTab.click();
   } else {
-    // Fallback: try text-based matching
     const reviewsTab = page.locator(
       'button:has-text("Reviews"), button:has-text("Opinie"), button:has-text("review")',
     );
@@ -216,8 +216,9 @@ async function openReviewsTab(page: Page): Promise<void> {
     }
   }
 
-  // Wait for review cards to appear
-  await page.waitForSelector("div.jftiEf", { timeout: 10000 });
+  // Wait for review cards to appear with longer timeout
+  await page.waitForSelector("div.jftiEf", { timeout: 15000 });
+  await page.waitForTimeout(1000);
   logger.debug("Reviews panel loaded");
 }
 
@@ -248,8 +249,8 @@ async function setSortOrder(page: Page, sortOrder: string): Promise<void> {
       await menuItems.nth(sortIndex).click();
       logger.debug(`Sort order set to: ${sortOrder}`);
 
-      // Wait for reviews to reload
-      await page.waitForTimeout(2000);
+      // Wait for reviews to reload after sort change
+      await page.waitForTimeout(3000);
     }
   } catch {
     logger.warn(`Could not set sort order to "${sortOrder}"`);
