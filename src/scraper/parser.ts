@@ -4,10 +4,11 @@ import { ReviewSchema, generateReviewId } from "../core/schema.js";
 import { logger } from "../utils/logger.js";
 
 /**
- * Detect the likely language of a text string.
- * Simple heuristic based on Unicode character ranges.
+ * Detect the likely script/language of a text string.
+ * Simple heuristic – only distinguishes Arabic vs Latin script.
+ * Returns lowercase language hint, not ISO 639 code.
  */
-function detectLanguage(text: string): string | null {
+export function detectLanguage(text: string): string | null {
   if (!text) return null;
 
   const arabicChars = text.match(/[\u0600-\u06FF]/g)?.length ?? 0;
@@ -25,8 +26,15 @@ function detectLanguage(text: string): string | null {
  */
 export function parseReview(raw: RawReview): Review | null {
   try {
-    // Use Google's review ID if available, fallback to hash
-    const id = raw.reviewId || generateReviewId(raw.author, raw.publishTime, raw.rating);
+    // Use Google's review ID if available, fallback to hash with text prefix
+    const id =
+      raw.reviewId ||
+      generateReviewId(
+        raw.author,
+        raw.publishTime,
+        raw.rating,
+        raw.text?.slice(0, 50),
+      );
 
     // Determine original vs translated text
     let text = raw.text;
@@ -45,7 +53,6 @@ export function parseReview(raw: RawReview): Review | null {
       author: raw.author,
       authorUrl: raw.authorUrl,
       publishTime: raw.publishTime,
-      publishTimestamp: null, // Relative time can't be reliably converted
       rating: raw.rating,
       text,
       originalText,
@@ -56,7 +63,7 @@ export function parseReview(raw: RawReview): Review | null {
             text: raw.ownerResponseText,
             originalText: raw.ownerResponseText,
             originalLanguage: detectLanguage(raw.ownerResponseText),
-            publishTime: raw.ownerResponseTime ?? "",
+            publishTime: raw.ownerResponseTime || null,
           }
         : null,
     };

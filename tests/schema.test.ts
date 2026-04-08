@@ -1,6 +1,9 @@
 import { describe, it, expect } from "vitest";
 import {
   ReviewSchema,
+  OwnerResponseSchema,
+  BusinessSchema,
+  MetadataSchema,
   ScrapeResultSchema,
   generateReviewId,
 } from "../src/core/schema.js";
@@ -11,7 +14,6 @@ describe("ReviewSchema", () => {
     author: "John Doe",
     authorUrl: "https://www.google.com/maps/contrib/12345",
     publishTime: "2 weeks ago",
-    publishTimestamp: "2025-09-01T00:00:00.000Z",
     rating: 5,
     text: "Great place!",
     originalText: "مكان رائع!",
@@ -34,7 +36,6 @@ describe("ReviewSchema", () => {
     const review = {
       ...validReview,
       authorUrl: null,
-      publishTimestamp: null,
       text: null,
       originalText: null,
       originalLanguage: null,
@@ -65,6 +66,55 @@ describe("ReviewSchema", () => {
   });
 });
 
+describe("OwnerResponseSchema", () => {
+  it("accepts null publishTime", () => {
+    const result = OwnerResponseSchema.safeParse({
+      text: "Thanks",
+      originalText: "Thanks",
+      originalLanguage: "english",
+      publishTime: null,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts all-null optional fields", () => {
+    const result = OwnerResponseSchema.safeParse({
+      text: null,
+      originalText: null,
+      originalLanguage: null,
+      publishTime: null,
+    });
+    expect(result.success).toBe(true);
+  });
+});
+
+describe("BusinessSchema", () => {
+  it("accepts all-null optional fields", () => {
+    const result = BusinessSchema.safeParse({
+      name: "Test",
+      placeId: null,
+      url: "https://example.com",
+      address: null,
+      rating: null,
+      totalReviews: null,
+      scrapeDate: "2025-01-01T00:00:00Z",
+    });
+    expect(result.success).toBe(true);
+  });
+});
+
+describe("MetadataSchema", () => {
+  it("rejects invalid provider", () => {
+    const result = MetadataSchema.safeParse({
+      provider: "serpapi",
+      scrapeDurationMs: 1000,
+      reviewsCollected: 10,
+      sortOrder: "newest",
+    });
+    expect(result.success).toBe(false);
+  });
+});
+
 describe("ScrapeResultSchema", () => {
   it("validates a complete scrape result", () => {
     const result = ScrapeResultSchema.safeParse({
@@ -90,9 +140,9 @@ describe("ScrapeResultSchema", () => {
 });
 
 describe("generateReviewId", () => {
-  it("produces a 12-char hex string", () => {
+  it("produces a 16-char hex string", () => {
     const id = generateReviewId("John", "2 weeks ago", 5);
-    expect(id).toMatch(/^[0-9a-f]{12}$/);
+    expect(id).toMatch(/^[0-9a-f]{16}$/);
   });
 
   it("is deterministic", () => {
@@ -104,6 +154,12 @@ describe("generateReviewId", () => {
   it("differs for different inputs", () => {
     const a = generateReviewId("John", "2 weeks ago", 5);
     const b = generateReviewId("Jane", "2 weeks ago", 5);
+    expect(a).not.toBe(b);
+  });
+
+  it("uses text prefix for better uniqueness", () => {
+    const a = generateReviewId("Anon", "a month ago", 5, "Great place");
+    const b = generateReviewId("Anon", "a month ago", 5, "Terrible");
     expect(a).not.toBe(b);
   });
 });
