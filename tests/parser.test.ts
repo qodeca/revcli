@@ -95,9 +95,10 @@ describe("parseReview", () => {
     expect(result!.ownerResponse).toBeNull();
   });
 
-  it("returns null for invalid data (rating 0)", () => {
+  it("preserves rating=0 when stars selector is stale", () => {
     const result = parseReview(makeRawReview({ rating: 0 }));
-    expect(result).toBeNull();
+    expect(result).not.toBeNull();
+    expect(result!.rating).toBe(0);
   });
 
   it("returns null for rating > 5", () => {

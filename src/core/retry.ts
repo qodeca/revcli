@@ -52,7 +52,7 @@ export async function withRetry<T>(
   throw lastError!;
 }
 
-function isUnrecoverable(error: Error): boolean {
+export function isUnrecoverable(error: Error): boolean {
   const message = error.message.toLowerCase();
   return (
     message.includes("invalid input") ||

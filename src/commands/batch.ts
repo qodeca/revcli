@@ -1,30 +1,33 @@
-import { readFile, mkdir, writeFile } from "node:fs/promises";
+import { readFile, mkdir, writeFile, rename } from "node:fs/promises";
 import { join } from "node:path";
 import { existsSync } from "node:fs";
+import { z } from "zod";
 import { createHash } from "node:crypto";
-import { isGoogleMapsUrl } from "../utils/url.js";
+import { isGoogleMapsUrl, parseGoogleMapsInput } from "../utils/url.js";
 import { logger } from "../utils/logger.js";
-import { writeJson } from "../output/json.js";
-import { writeCsv } from "../output/csv.js";
+import { writeOutput } from "../output/write.js";
 import { scrapeLocation } from "../scraper/scrape-location.js";
 import { withRetry } from "../core/retry.js";
 import { RateLimiter } from "../core/rate-limiter.js";
 import { BatchProgress } from "../utils/progress.js";
+import type { SortOrder, OutputFormat } from "../core/schema.js";
 
 export interface BatchOptions {
   outputDir: string;
   maxReviews?: number;
-  sort: string;
-  format: string;
+  sort: SortOrder;
+  format: OutputFormat;
   headed: boolean;
   delay: number;
   resume: boolean;
   locationDelay: number;
+  locationTimeout: number;
 }
 
-interface BatchState {
-  completed: string[];
-}
+const BatchStateSchema = z.object({
+  completed: z.array(z.string()),
+});
+type BatchState = z.infer<typeof BatchStateSchema>;
 
 export async function batchCommand(
   file: string,
@@ -46,8 +49,18 @@ export async function batchCommand(
   const stateFile = join(options.outputDir, ".revcli-state.json");
   let state: BatchState = { completed: [] };
   if (options.resume && existsSync(stateFile)) {
-    state = JSON.parse(await readFile(stateFile, "utf-8"));
-    logger.info(`Resuming: ${state.completed.length} locations already done`);
+    try {
+      const raw = JSON.parse(await readFile(stateFile, "utf-8"));
+      const parsed = BatchStateSchema.safeParse(raw);
+      if (parsed.success) {
+        state = parsed.data;
+        logger.info(`Resuming: ${state.completed.length} locations already done`);
+      } else {
+        logger.warn("Corrupted state file – starting fresh");
+      }
+    } catch {
+      logger.warn("Could not read state file – starting fresh");
+    }
   }
 
   const remaining = urls.filter((url) => !state.completed.includes(url));
@@ -63,9 +76,10 @@ export async function batchCommand(
     await rateLimiter.wait();
 
     try {
-      const result = await withRetry(
+      const parsed = parseGoogleMapsInput(url);
+      const scrapePromise = withRetry(
         () =>
-          scrapeLocation(url, {
+          scrapeLocation(parsed, {
             sort: options.sort,
             maxReviews: options.maxReviews,
             headed: options.headed,
@@ -74,20 +88,26 @@ export async function batchCommand(
         url,
         { maxRetries: 2 },
       );
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(
+          () => reject(new Error(`Location timeout after ${options.locationTimeout / 1000}s`)),
+          options.locationTimeout,
+        ),
+      );
+      const result = await Promise.race([scrapePromise, timeoutPromise]);
 
       const ext = options.format === "csv" ? ".csv" : ".json";
-      const filename = slugify(result.business.name) + ext;
+      const baseSlug = slugify(result.business.name);
+      const filename = deduplicateFilename(options.outputDir, baseSlug, ext);
       const outputPath = join(options.outputDir, filename);
 
-      if (options.format === "csv") {
-        await writeCsv(result, outputPath);
-      } else {
-        await writeJson(result, outputPath);
-      }
+      await writeOutput(result, outputPath, options.format);
 
       progress.success(result.business.name, result.reviews.length);
       state.completed.push(url);
-      await writeFile(stateFile, JSON.stringify(state, null, 2));
+      const tmpFile = stateFile + ".tmp";
+      await writeFile(tmpFile, JSON.stringify(state, null, 2));
+      await rename(tmpFile, stateFile);
     } catch (error) {
       const message =
         error instanceof Error ? error.message : String(error);
@@ -106,19 +126,45 @@ export function parseInputFile(content: string): string[] {
   try {
     const parsed = JSON.parse(content);
     if (Array.isArray(parsed)) {
-      return parsed.filter(
-        (item: unknown) => typeof item === "string" && isGoogleMapsUrl(item),
-      );
+      const results: string[] = [];
+      for (const item of parsed) {
+        if (typeof item === "string" && isGoogleMapsUrl(item)) {
+          results.push(item);
+        } else if (typeof item === "string" && item.trim().length > 0) {
+          logger.warn(`Skipping invalid URL: ${item}`);
+        }
+      }
+      return results;
     }
   } catch {
     // Not JSON – treat as newline-delimited
   }
 
-  return content
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0 && !line.startsWith("#"))
-    .filter(isGoogleMapsUrl);
+  const results: string[] = [];
+  for (const rawLine of content.split("\n")) {
+    const line = rawLine.trim();
+    if (line.length === 0 || line.startsWith("#")) continue;
+    if (isGoogleMapsUrl(line)) {
+      results.push(line);
+    } else {
+      logger.warn(`Skipping invalid URL: ${line}`);
+    }
+  }
+  return results;
+}
+
+export function deduplicateFilename(
+  dir: string,
+  baseSlug: string,
+  ext: string,
+): string {
+  let candidate = baseSlug + ext;
+  let counter = 2;
+  while (existsSync(join(dir, candidate))) {
+    candidate = `${baseSlug}-${counter}${ext}`;
+    counter++;
+  }
+  return candidate;
 }
 
 export function slugify(name: string): string {

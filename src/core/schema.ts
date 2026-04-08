@@ -1,6 +1,12 @@
 import { z } from "zod";
 import { createHash } from "node:crypto";
 
+export const SORT_ORDERS = ["newest", "relevant", "highest", "lowest"] as const;
+export type SortOrder = (typeof SORT_ORDERS)[number];
+
+export const OUTPUT_FORMATS = ["json", "csv"] as const;
+export type OutputFormat = (typeof OUTPUT_FORMATS)[number];
+
 export const OwnerResponseSchema = z.object({
   text: z.string().nullable(),
   originalText: z.string().nullable(),
@@ -13,7 +19,7 @@ export const ReviewSchema = z.object({
   author: z.string(),
   authorUrl: z.string().nullable(),
   publishTime: z.string(),
-  rating: z.number().int().min(1).max(5),
+  rating: z.number().int().min(0).max(5),
   text: z.string().nullable(),
   originalText: z.string().nullable(),
   originalLanguage: z.string().nullable(),
@@ -35,7 +41,7 @@ export const MetadataSchema = z.object({
   provider: z.enum(["playwright"]),
   scrapeDurationMs: z.number(),
   reviewsCollected: z.number().int(),
-  sortOrder: z.string(),
+  sortOrder: z.enum(SORT_ORDERS),
 });
 
 export const ScrapeResultSchema = z.object({

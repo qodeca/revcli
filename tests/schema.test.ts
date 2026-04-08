@@ -45,9 +45,15 @@ describe("ReviewSchema", () => {
     expect(result.success).toBe(true);
   });
 
-  it("rejects rating outside 1-5", () => {
+  it("allows rating=0 (stale selector sentinel)", () => {
     expect(
       ReviewSchema.safeParse({ ...validReview, rating: 0 }).success,
+    ).toBe(true);
+  });
+
+  it("rejects rating outside 0-5", () => {
+    expect(
+      ReviewSchema.safeParse({ ...validReview, rating: -1 }).success,
     ).toBe(false);
     expect(
       ReviewSchema.safeParse({ ...validReview, rating: 6 }).success,

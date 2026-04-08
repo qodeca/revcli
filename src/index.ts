@@ -3,6 +3,8 @@ import { scrapeCommand } from "./commands/scrape.js";
 import { batchCommand } from "./commands/batch.js";
 import { validateCommand } from "./commands/validate.js";
 import { setVerbose } from "./utils/logger.js";
+import { SORT_ORDERS, OUTPUT_FORMATS } from "./core/schema.js";
+import type { SortOrder, OutputFormat } from "./core/schema.js";
 
 function parsePositiveInt(value: string): number {
   const n = parseInt(value, 10);
@@ -11,9 +13,6 @@ function parsePositiveInt(value: string): number {
   }
   return n;
 }
-
-const SORT_CHOICES = ["newest", "relevant", "highest", "lowest"];
-const FORMAT_CHOICES = ["json", "csv"];
 
 const program = new Command();
 
@@ -29,13 +28,13 @@ program
   .option("-m, --max-reviews <n>", "maximum reviews to collect", parsePositiveInt)
   .option(
     "-s, --sort <order>",
-    `sort order: ${SORT_CHOICES.join(", ")}`,
+    `sort order: ${SORT_ORDERS.join(", ")}`,
     "newest",
   )
   .option("-o, --output <path>", "output file path (default: stdout)")
   .option(
     "-f, --format <type>",
-    `output format: ${FORMAT_CHOICES.join(", ")}`,
+    `output format: ${OUTPUT_FORMATS.join(", ")}`,
     "json",
   )
   .option("--headed", "show browser window for debugging", false)
@@ -47,18 +46,18 @@ program
   )
   .option("-v, --verbose", "verbose logging", false)
   .action(async (url: string, opts) => {
-    if (!SORT_CHOICES.includes(opts.sort)) {
-      program.error(`invalid sort order "${opts.sort}" (choose: ${SORT_CHOICES.join(", ")})`);
+    if (!(SORT_ORDERS as readonly string[]).includes(opts.sort)) {
+      program.error(`invalid sort order "${opts.sort}" (choose: ${SORT_ORDERS.join(", ")})`);
     }
-    if (!FORMAT_CHOICES.includes(opts.format)) {
-      program.error(`invalid format "${opts.format}" (choose: ${FORMAT_CHOICES.join(", ")})`);
+    if (!(OUTPUT_FORMATS as readonly string[]).includes(opts.format)) {
+      program.error(`invalid format "${opts.format}" (choose: ${OUTPUT_FORMATS.join(", ")})`);
     }
     setVerbose(opts.verbose);
     await scrapeCommand(url, {
       maxReviews: opts.maxReviews,
-      sort: opts.sort,
+      sort: opts.sort as SortOrder,
       output: opts.output,
-      format: opts.format,
+      format: opts.format as OutputFormat,
       headed: opts.headed,
       delay: opts.delay,
     });
@@ -76,12 +75,12 @@ program
   )
   .option(
     "-s, --sort <order>",
-    `sort order: ${SORT_CHOICES.join(", ")}`,
+    `sort order: ${SORT_ORDERS.join(", ")}`,
     "newest",
   )
   .option(
     "-f, --format <type>",
-    `output format: ${FORMAT_CHOICES.join(", ")}`,
+    `output format: ${OUTPUT_FORMATS.join(", ")}`,
     "json",
   )
   .option("--headed", "show browser window for debugging", false)
@@ -97,24 +96,31 @@ program
     parsePositiveInt,
     10000,
   )
+  .option(
+    "--location-timeout <ms>",
+    "timeout per location in ms",
+    parsePositiveInt,
+    300000,
+  )
   .option("--resume", "skip already-scraped locations", false)
   .option("-v, --verbose", "verbose logging", false)
   .action(async (file: string, opts) => {
-    if (!SORT_CHOICES.includes(opts.sort)) {
-      program.error(`invalid sort order "${opts.sort}" (choose: ${SORT_CHOICES.join(", ")})`);
+    if (!(SORT_ORDERS as readonly string[]).includes(opts.sort)) {
+      program.error(`invalid sort order "${opts.sort}" (choose: ${SORT_ORDERS.join(", ")})`);
     }
-    if (!FORMAT_CHOICES.includes(opts.format)) {
-      program.error(`invalid format "${opts.format}" (choose: ${FORMAT_CHOICES.join(", ")})`);
+    if (!(OUTPUT_FORMATS as readonly string[]).includes(opts.format)) {
+      program.error(`invalid format "${opts.format}" (choose: ${OUTPUT_FORMATS.join(", ")})`);
     }
     setVerbose(opts.verbose);
     await batchCommand(file, {
       outputDir: opts.outputDir,
       maxReviews: opts.maxReviews,
-      sort: opts.sort,
-      format: opts.format,
+      sort: opts.sort as SortOrder,
+      format: opts.format as OutputFormat,
       headed: opts.headed,
       delay: opts.delay,
       locationDelay: opts.locationDelay,
+      locationTimeout: opts.locationTimeout,
       resume: opts.resume,
     });
   });

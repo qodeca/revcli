@@ -89,7 +89,7 @@ export async function extractReviews(page: Page): Promise<RawReview[]> {
 
         const starsEl = card.querySelector(s.stars);
         const starsLabel = starsEl?.getAttribute("aria-label") ?? "";
-        const ratingMatch = starsLabel.match(/(\d)/);
+        const ratingMatch = starsLabel.match(/(\d+)/);
         const rating = ratingMatch ? parseInt(ratingMatch[1]) : 0;
 
         const timeContainer = card.querySelector(s.timeContainer);

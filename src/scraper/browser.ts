@@ -44,28 +44,29 @@ export async function launchBrowser(
   return { browser, page };
 }
 
-let activeBrowser: Browser | null = null;
+const activeBrowsers = new Set<Browser>();
 
-// Clean up browser on unexpected termination
-process.on("SIGINT", async () => {
-  if (activeBrowser) {
-    await closeBrowser(activeBrowser);
-  }
-  process.exit(130);
+// Clean up browsers on unexpected termination
+process.once("SIGINT", () => {
+  const cleanups = [...activeBrowsers].map((b) =>
+    b.close().catch(() => {}),
+  );
+  Promise.all(cleanups).finally(() => {
+    process.exit(130);
+  });
 });
 
 export function trackBrowser(browser: Browser): void {
-  activeBrowser = browser;
+  activeBrowsers.add(browser);
 }
 
 export async function closeBrowser(browser: Browser): Promise<void> {
   try {
     await browser.close();
-    if (activeBrowser === browser) {
-      activeBrowser = null;
-    }
     logger.debug("Browser closed");
   } catch {
     // Browser may already be closed
+  } finally {
+    activeBrowsers.delete(browser);
   }
 }

@@ -48,6 +48,12 @@ export function parseReview(raw: RawReview): Review | null {
       originalLanguage = detectLanguage(text);
     }
 
+    if (raw.rating === 0) {
+      logger.warn(
+        `Review by "${raw.author}" has rating=0 – stars selector may be stale`,
+      );
+    }
+
     const review: Review = {
       id,
       author: raw.author,

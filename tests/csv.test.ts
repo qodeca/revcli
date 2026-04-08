@@ -103,7 +103,7 @@ describe("writeCsv", () => {
     const output = writeSpy.mock.calls[0][0] as string;
     const header = output.split("\n")[0];
     expect(header).toBe(
-      "business_name,review_id,author,rating,publish_time,text,original_text,original_language,photos,owner_response_text,owner_response_time",
+      "business_name,review_id,author,author_url,rating,publish_time,text,original_text,original_language,photos,owner_response_text,owner_response_time",
     );
     writeSpy.mockRestore();
   });
@@ -115,5 +115,23 @@ describe("writeCsv", () => {
     const lines = output.trim().split("\n");
     expect(lines).toHaveLength(1);
     writeSpy.mockRestore();
+  });
+
+  it("writes to file when output path given", async () => {
+    const { mkdtempSync, rmSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const { readFile } = await import("node:fs/promises");
+
+    const tmpDir = mkdtempSync(join(import.meta.dirname ?? ".", "csv-"));
+    const outputPath = join(tmpDir, "output.csv");
+
+    await writeCsv(mockResult, outputPath);
+
+    const content = await readFile(outputPath, "utf-8");
+    expect(content).toContain("business_name");
+    expect(content).toContain("Test Gym");
+    expect(content).toContain("Alice");
+
+    rmSync(tmpDir, { recursive: true });
   });
 });
