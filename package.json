@@ -6,7 +6,6 @@
   "bin": {
     "revcli": "./dist/index.js"
   },
-  "main": "./dist/index.js",
   "files": [
     "dist"
   ],
@@ -15,6 +14,7 @@
     "build": "tsup",
     "test": "vitest run",
     "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
     "prepublishOnly": "npm run build"
   },
   "keywords": [
