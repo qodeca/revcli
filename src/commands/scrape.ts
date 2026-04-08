@@ -4,6 +4,7 @@ import { writeJson } from "../output/json.js";
 import { launchBrowser, closeBrowser } from "../scraper/browser.js";
 import { navigateToReviews } from "../scraper/navigator.js";
 import { scrollAndCollectReviews } from "../scraper/scroller.js";
+import { withRetry } from "../core/retry.js";
 import type { ScrapeResult, Review } from "../core/schema.js";
 
 export interface ScrapeOptions {
@@ -23,38 +24,53 @@ export async function scrapeCommand(
   logger.info(`Scraping reviews from: ${parsed.url}`);
 
   const startTime = Date.now();
-  const { browser, page } = await launchBrowser({ headed: options.headed });
 
-  try {
-    const businessInfo = await navigateToReviews(page, parsed, options.sort);
-    logger.info(
-      `Found: ${businessInfo.name} (${businessInfo.totalReviews ?? "?"} reviews)`,
-    );
+  const result = await withRetry(
+    async () => {
+      const { browser, page } = await launchBrowser({
+        headed: options.headed,
+      });
 
-    const reviews: Review[] = await scrollAndCollectReviews(page, {
-      maxReviews: options.maxReviews,
-      delayMs: options.delay,
-    });
+      try {
+        const businessInfo = await navigateToReviews(
+          page,
+          parsed,
+          options.sort,
+        );
+        logger.info(
+          `Found: ${businessInfo.name} (${businessInfo.totalReviews ?? "?"} reviews)`,
+        );
 
-    const result: ScrapeResult = {
-      business: {
-        ...businessInfo,
-        scrapeDate: new Date().toISOString(),
-      },
-      reviews,
-      metadata: {
-        provider: "playwright",
-        scrapeDurationMs: Date.now() - startTime,
-        reviewsCollected: reviews.length,
-        sortOrder: options.sort,
-      },
-    };
+        const reviews: Review[] = await scrollAndCollectReviews(page, {
+          maxReviews: options.maxReviews,
+          delayMs: options.delay,
+        });
 
-    await writeJson(result, options.output ?? null);
-    logger.success(
-      `Collected ${reviews.length} reviews in ${((Date.now() - startTime) / 1000).toFixed(1)}s`,
-    );
-  } finally {
-    await closeBrowser(browser);
-  }
+        const scrapeResult: ScrapeResult = {
+          business: {
+            ...businessInfo,
+            scrapeDate: new Date().toISOString(),
+          },
+          reviews,
+          metadata: {
+            provider: "playwright",
+            scrapeDurationMs: Date.now() - startTime,
+            reviewsCollected: reviews.length,
+            sortOrder: options.sort,
+          },
+        };
+
+        return scrapeResult;
+      } finally {
+        await closeBrowser(browser);
+      }
+    },
+    "scrape",
+    { maxRetries: 2 },
+  );
+
+  await writeJson(result, options.output ?? null);
+  logger.success(
+    `Collected ${result.reviews.length} reviews in ${((Date.now() - startTime) / 1000).toFixed(1)}s`,
+  );
 }
