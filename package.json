@@ -1,0 +1,44 @@
+{
+  "name": "revcli",
+  "version": "0.1.0",
+  "description": "CLI tool to scrape Google Maps location reviews using Playwright",
+  "type": "module",
+  "bin": {
+    "revcli": "./dist/index.js"
+  },
+  "main": "./dist/index.js",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsup",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "google-maps",
+    "reviews",
+    "scraper",
+    "cli",
+    "playwright"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "commander": "^13.1.0",
+    "consola": "^3.4.0",
+    "playwright": "^1.52.0",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "tsup": "^8.4.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.8.0",
+    "vitest": "^3.1.0"
+  }
+}
