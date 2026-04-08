@@ -107,6 +107,7 @@ Scrape reviews from multiple locations listed in a file. Produces one output fil
 | `--headed` | `false` | Show the browser window |
 | `--delay <ms>` | `3000` | Delay in milliseconds between scroll actions within a location |
 | `--location-delay <ms>` | `10000` | Delay in milliseconds between locations. Increase to reduce rate-limiting risk |
+| `--location-timeout <ms>` | `300000` | Timeout per location in milliseconds (default: 5 minutes). Prevents indefinite hangs |
 | `--resume` | `false` | Skip locations already scraped in a previous run. State tracked via `.revcli-state.json` in the output directory |
 | `-v, --verbose` | `false` | Enable debug-level logging |
 
@@ -172,7 +173,7 @@ revcli validate output/bfit-yasmeen-mens.json
       "author": "Reviewer Name",
       "authorUrl": "https://www.google.com/maps/contrib/...",
       "publishTime": "2 weeks ago",
-      "rating": 5,
+      "rating": 5,  // 0–5 (0 = could not parse stars)
       "text": "Review text (translated if applicable)",
       "originalText": "Original language text",
       "originalLanguage": "arabic",
@@ -231,7 +232,7 @@ npx playwright install chromium
 
 ```bash
 npm run dev -- scrape "https://maps.app.goo.gl/..." -m 5    # Run from source
-npm test                                                      # Run all 81 tests
+npm test                                                      # Run all tests (106)
 npx vitest run tests/parser.test.ts                           # Run single test file
 npm run typecheck                                             # Type check
 npm run build                                                 # Build to dist/
@@ -242,10 +243,14 @@ npm run build                                                 # Build to dist/
 ```
 src/
 ├── commands/       # CLI command handlers (scrape, batch, validate)
-├── scraper/        # Playwright automation (browser, navigator, scroller, extractor, parser)
-│   └── selectors.ts  # All Google Maps CSS selectors (update here when they break)
-├── core/           # Schema definitions (Zod), retry logic, rate limiter
-├── output/         # JSON and CSV writers
+├── scraper/        # Playwright automation
+│   ├── navigator.ts            # Orchestrates page navigation flow
+│   ├── consent.ts              # Google consent + locale handling
+│   ├── business-extractor.ts   # Business info extraction from DOM
+│   ├── scroller.ts, extractor.ts, parser.ts  # Review collection pipeline
+│   └── selectors.ts            # All Google Maps CSS selectors (update here when they break)
+├── core/           # Schema definitions (Zod), types (SortOrder, OutputFormat), retry, rate limiter
+├── output/         # writeOutput() dispatcher, JSON and CSV writers
 └── utils/          # URL parser, logger, batch progress
 ```
 
