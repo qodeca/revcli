@@ -83,7 +83,6 @@ revcli validate reviews.json
       "author": "Reviewer Name",
       "authorUrl": "https://www.google.com/maps/contrib/...",
       "publishTime": "2 weeks ago",
-      "publishTimestamp": null,
       "rating": 5,
       "text": "Review text (translated)",
       "originalText": "Original language text",
