@@ -47,6 +47,13 @@ describe("parseGoogleMapsInput", () => {
     expect(result.url).toBe(url.trim());
   });
 
+  it("extracts placeId from ftid parameter", () => {
+    const url =
+      "https://www.google.com/maps/place/Foo/@0,0?ftid=0x3e2ee3641f7016d7:0x8e3a8bcf52dad296";
+    const result = parseGoogleMapsInput(url);
+    expect(result.placeId).toBe("0x3e2ee3641f7016d7:0x8e3a8bcf52dad296");
+  });
+
   it("handles google.co.uk domain", () => {
     const url =
       "https://www.google.co.uk/maps/place/Something/@51.5,-0.1,15z";

@@ -38,4 +38,29 @@ describe("withRetry", () => {
     ).rejects.toThrow("invalid input");
     expect(fn).toHaveBeenCalledTimes(1);
   });
+
+  it("does not retry captcha errors", async () => {
+    const fn = vi.fn().mockRejectedValue(new Error("captcha detected"));
+    await expect(
+      withRetry(fn, "test", { maxRetries: 3, baseDelayMs: 10 }),
+    ).rejects.toThrow("captcha");
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not retry Playwright launch errors", async () => {
+    const fn = vi
+      .fn()
+      .mockRejectedValue(new Error("Executable doesn't exist"));
+    await expect(
+      withRetry(fn, "test", { maxRetries: 3, baseDelayMs: 10 }),
+    ).rejects.toThrow("Executable");
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  it("wraps non-Error throwables", async () => {
+    const fn = vi.fn().mockRejectedValue("string error");
+    await expect(
+      withRetry(fn, "test", { maxRetries: 0, baseDelayMs: 10 }),
+    ).rejects.toThrow("string error");
+  });
 });
