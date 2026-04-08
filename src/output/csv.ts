@@ -15,10 +15,14 @@ const CSV_HEADERS = [
   "owner_response_time",
 ];
 
-function escapeCsv(value: string | null | undefined): string {
+export function escapeCsv(value: string | null | undefined): string {
   if (value == null) return "";
-  const str = String(value);
-  if (str.includes(",") || str.includes('"') || str.includes("\n")) {
+  let str = String(value);
+  // Prevent CSV formula injection (CWE-1236)
+  if (/^[=+\-@]/.test(str)) {
+    str = `\t${str}`;
+  }
+  if (str.includes(",") || str.includes('"') || str.includes("\n") || str.includes("\t")) {
     return `"${str.replace(/"/g, '""')}"`;
   }
   return str;

@@ -1,16 +1,15 @@
 import { readFile, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { existsSync } from "node:fs";
-import { parseGoogleMapsInput, isGoogleMapsUrl } from "../utils/url.js";
+import { createHash } from "node:crypto";
+import { isGoogleMapsUrl } from "../utils/url.js";
 import { logger } from "../utils/logger.js";
 import { writeJson } from "../output/json.js";
-import { launchBrowser, closeBrowser } from "../scraper/browser.js";
-import { navigateToReviews } from "../scraper/navigator.js";
-import { scrollAndCollectReviews } from "../scraper/scroller.js";
+import { writeCsv } from "../output/csv.js";
+import { scrapeLocation } from "../scraper/scrape-location.js";
 import { withRetry } from "../core/retry.js";
 import { RateLimiter } from "../core/rate-limiter.js";
 import { BatchProgress } from "../utils/progress.js";
-import type { ScrapeResult, Review } from "../core/schema.js";
 
 export interface BatchOptions {
   outputDir: string;
@@ -31,21 +30,19 @@ export async function batchCommand(
   file: string,
   options: BatchOptions,
 ): Promise<void> {
-  // Read and parse input file
   const content = await readFile(file, "utf-8");
   const urls = parseInputFile(content);
 
   if (urls.length === 0) {
     logger.error("No valid Google Maps URLs found in input file");
+    process.exitCode = 1;
     return;
   }
 
   logger.info(`Found ${urls.length} locations to scrape`);
 
-  // Ensure output directory exists
   await mkdir(options.outputDir, { recursive: true });
 
-  // Load resume state if applicable
   const stateFile = join(options.outputDir, ".revcli-state.json");
   let state: BatchState = { completed: [] };
   if (options.resume && existsSync(stateFile)) {
@@ -67,15 +64,26 @@ export async function batchCommand(
 
     try {
       const result = await withRetry(
-        () => scrapeLocation(url, options),
+        () =>
+          scrapeLocation(url, {
+            sort: options.sort,
+            maxReviews: options.maxReviews,
+            headed: options.headed,
+            delay: options.delay,
+          }),
         url,
         { maxRetries: 2 },
       );
 
-      // Generate filename from business name
-      const filename = slugify(result.business.name) + ".json";
+      const ext = options.format === "csv" ? ".csv" : ".json";
+      const filename = slugify(result.business.name) + ext;
       const outputPath = join(options.outputDir, filename);
-      await writeJson(result, outputPath);
+
+      if (options.format === "csv") {
+        await writeCsv(result, outputPath);
+      } else {
+        await writeJson(result, outputPath);
+      }
 
       progress.success(result.business.name, result.reviews.length);
       state.completed.push(url);
@@ -88,43 +96,13 @@ export async function batchCommand(
   }
 
   progress.summary();
-}
 
-async function scrapeLocation(
-  url: string,
-  options: BatchOptions,
-): Promise<ScrapeResult> {
-  const parsed = parseGoogleMapsInput(url);
-  const startTime = Date.now();
-  const { browser, page } = await launchBrowser({ headed: options.headed });
-
-  try {
-    const businessInfo = await navigateToReviews(page, parsed, options.sort);
-    const reviews: Review[] = await scrollAndCollectReviews(page, {
-      maxReviews: options.maxReviews,
-      delayMs: options.delay,
-    });
-
-    return {
-      business: {
-        ...businessInfo,
-        scrapeDate: new Date().toISOString(),
-      },
-      reviews,
-      metadata: {
-        provider: "playwright",
-        scrapeDurationMs: Date.now() - startTime,
-        reviewsCollected: reviews.length,
-        sortOrder: options.sort,
-      },
-    };
-  } finally {
-    await closeBrowser(browser);
+  if (progress.failedCount > 0) {
+    process.exitCode = 1;
   }
 }
 
-function parseInputFile(content: string): string[] {
-  // Try JSON array first
+export function parseInputFile(content: string): string[] {
   try {
     const parsed = JSON.parse(content);
     if (Array.isArray(parsed)) {
@@ -143,10 +121,17 @@ function parseInputFile(content: string): string[] {
     .filter(isGoogleMapsUrl);
 }
 
-function slugify(name: string): string {
-  return name
+export function slugify(name: string): string {
+  const slug = name
     .toLowerCase()
     .replace(/['']/g, "")
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
+
+  if (slug.length === 0) {
+    // Non-Latin names produce empty slugs – use hash fallback
+    return createHash("sha256").update(name).digest("hex").slice(0, 12);
+  }
+
+  return slug;
 }

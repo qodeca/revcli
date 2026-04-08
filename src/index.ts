@@ -1,8 +1,19 @@
-import { Command } from "commander";
+import { Command, InvalidArgumentError } from "commander";
 import { scrapeCommand } from "./commands/scrape.js";
 import { batchCommand } from "./commands/batch.js";
 import { validateCommand } from "./commands/validate.js";
 import { setVerbose } from "./utils/logger.js";
+
+function parsePositiveInt(value: string): number {
+  const n = parseInt(value, 10);
+  if (isNaN(n) || n <= 0) {
+    throw new InvalidArgumentError("must be a positive integer");
+  }
+  return n;
+}
+
+const SORT_CHOICES = ["newest", "relevant", "highest", "lowest"];
+const FORMAT_CHOICES = ["json", "csv"];
 
 const program = new Command();
 
@@ -15,23 +26,33 @@ program
   .command("scrape")
   .description("Scrape reviews from a Google Maps location")
   .argument("<url>", "Google Maps URL or Place ID")
-  .option("-m, --max-reviews <n>", "maximum reviews to collect", parseInt)
+  .option("-m, --max-reviews <n>", "maximum reviews to collect", parsePositiveInt)
   .option(
     "-s, --sort <order>",
-    "sort order: newest, relevant, highest, lowest",
+    `sort order: ${SORT_CHOICES.join(", ")}`,
     "newest",
   )
   .option("-o, --output <path>", "output file path (default: stdout)")
-  .option("-f, --format <type>", "output format: json, csv", "json")
+  .option(
+    "-f, --format <type>",
+    `output format: ${FORMAT_CHOICES.join(", ")}`,
+    "json",
+  )
   .option("--headed", "show browser window for debugging", false)
   .option(
     "--delay <ms>",
     "delay between scroll actions in ms",
-    parseInt,
+    parsePositiveInt,
     3000,
   )
   .option("-v, --verbose", "verbose logging", false)
   .action(async (url: string, opts) => {
+    if (!SORT_CHOICES.includes(opts.sort)) {
+      program.error(`invalid sort order "${opts.sort}" (choose: ${SORT_CHOICES.join(", ")})`);
+    }
+    if (!FORMAT_CHOICES.includes(opts.format)) {
+      program.error(`invalid format "${opts.format}" (choose: ${FORMAT_CHOICES.join(", ")})`);
+    }
     setVerbose(opts.verbose);
     await scrapeCommand(url, {
       maxReviews: opts.maxReviews,
@@ -48,29 +69,43 @@ program
   .description("Scrape reviews from multiple locations listed in a file")
   .argument("<file>", "file with Google Maps URLs (one per line or JSON array)")
   .option("-d, --output-dir <path>", "output directory", "./output")
-  .option("-m, --max-reviews <n>", "maximum reviews per location", parseInt)
+  .option(
+    "-m, --max-reviews <n>",
+    "maximum reviews per location",
+    parsePositiveInt,
+  )
   .option(
     "-s, --sort <order>",
-    "sort order: newest, relevant, highest, lowest",
+    `sort order: ${SORT_CHOICES.join(", ")}`,
     "newest",
   )
-  .option("-f, --format <type>", "output format: json, csv", "json")
+  .option(
+    "-f, --format <type>",
+    `output format: ${FORMAT_CHOICES.join(", ")}`,
+    "json",
+  )
   .option("--headed", "show browser window for debugging", false)
   .option(
     "--delay <ms>",
     "delay between scroll actions in ms",
-    parseInt,
+    parsePositiveInt,
     3000,
   )
   .option(
     "--location-delay <ms>",
     "delay between locations in ms",
-    parseInt,
+    parsePositiveInt,
     10000,
   )
   .option("--resume", "skip already-scraped locations", false)
   .option("-v, --verbose", "verbose logging", false)
   .action(async (file: string, opts) => {
+    if (!SORT_CHOICES.includes(opts.sort)) {
+      program.error(`invalid sort order "${opts.sort}" (choose: ${SORT_CHOICES.join(", ")})`);
+    }
+    if (!FORMAT_CHOICES.includes(opts.format)) {
+      program.error(`invalid format "${opts.format}" (choose: ${FORMAT_CHOICES.join(", ")})`);
+    }
     setVerbose(opts.verbose);
     await batchCommand(file, {
       outputDir: opts.outputDir,
