@@ -44,6 +44,11 @@ src/output/
 ├── write.ts        ── writeOutput() – centralized format dispatch
 ├── json.ts         ── pretty JSON to file or stdout
 └── csv.ts          ── CSV with formula injection protection (includes author_url column)
+
+src/utils/
+├── url.ts          ── Google Maps URL parsing + validation (parseGoogleMapsInput)
+├── logger.ts       ── consola-based logger, setVerbose()
+└── progress.ts     ── batch progress display
 ```
 
 ### Key data flow
