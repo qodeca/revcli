@@ -45,6 +45,9 @@ export const SELECTORS = {
   sortMenuItem: 'div[role="menuitemradio"]',
   sortButton:
     'button[aria-label*="Sort" i], button[data-value="Sort"], button:has-text("Most relevant"), button:has-text("Newest")',
+  // Plain CSS subset of sortButton for use inside page.evaluate/waitForFunction
+  // (Playwright-specific :has-text() pseudo-selectors don't work in browser context)
+  sortButtonCSS: 'button[aria-label*="Sort" i], button[data-value="Sort"]',
   addressButton:
     'button[data-item-id="address"] div.fontBodyMedium, [data-item-id="address"]',
 } as const;
