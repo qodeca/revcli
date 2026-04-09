@@ -82,7 +82,7 @@ URL input → `parseGoogleMapsInput()` validates → `scrapeLocation(parsed)` la
 - ESM-only (`"type": "module"`, `.js` extensions in imports)
 - Node 22+ required
 - Strict TypeScript, zero `any` types
-- Tests use vitest (121 tests across 12 files) – pure-function tests for parser, schema, URL, CSV, JSON, retry, rate-limiter, consent, unrecoverable, batch-utils, validate, scroller; Playwright-dependent modules are not unit tested
+- Tests use vitest (140 tests across 12 files) – pure-function tests for parser, schema, URL, CSV, JSON, retry, rate-limiter, consent, unrecoverable, batch-utils, validate, scroller; Playwright-dependent modules are not unit tested
 - `parseInputFile()`, `slugify()`, and `deduplicateFilename()` in batch.ts are exported for testability
 - `appendHlParam()` in consent.ts and `isUnrecoverable()` in retry.ts are exported for testability
 - `calculateStaleDelay()` and `shouldContinueScrolling()` in scroller.ts are exported for testability

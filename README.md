@@ -67,7 +67,7 @@ Scrape reviews from a single Google Maps location.
 
 | Argument | Description |
 |----------|-------------|
-| `<url>` | Google Maps URL, short URL (`maps.app.goo.gl/...`), or Place ID (`ChIJ...`) |
+| `<url>` | Google Maps URL, short URL (`maps.app.goo.gl/...`), CID URL (`maps?cid=...`), ftid URL (`maps?ftid=0x...:0x...`), or Place ID (`ChIJ...`) |
 
 **Options:**
 
@@ -90,6 +90,7 @@ revcli scrape 'https://maps.app.goo.gl/MTVGWdpd8vVqTouv9'
 revcli scrape 'https://maps.app.goo.gl/MTVGWdpd8vVqTouv9' -m 50 -o reviews.json
 revcli scrape 'https://maps.app.goo.gl/MTVGWdpd8vVqTouv9' --sort relevant --format csv -o reviews.csv
 revcli scrape 'ChIJN1t_tDeuEmsRUsoyG83frY4' -m 20 -o place.json
+revcli scrape 'https://www.google.com/maps?ftid=0x3e2ee3641f7016d7:0x8e3a8bcf52dad296'
 revcli scrape 'https://maps.app.goo.gl/MTVGWdpd8vVqTouv9' --headless --verbose --delay 5000
 ```
 
