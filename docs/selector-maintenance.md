@@ -13,7 +13,7 @@ All selectors live in **`src/scraper/selectors.ts`** – the single file to upda
 
 **Quick check – run with `--verbose`:**
 ```bash
-npx tsx src/index.ts scrape "https://maps.app.goo.gl/MTVGWdpd8vVqTouv9" --max-reviews 5 --verbose
+npx tsx src/index.ts scrape 'https://maps.app.goo.gl/MTVGWdpd8vVqTouv9' --max-reviews 5 --verbose
 ```
 
 The browser shows by default. If reviews are visually present but the CLI reports 0, selectors are stale. Use `--headless` only if you don't need to see the browser.
@@ -58,7 +58,7 @@ Look for the repeating container element that wraps each review. Previously `div
 2. Update the "Last verified" date comment at the top
 3. Run a test scrape:
    ```bash
-   npx tsx src/index.ts scrape "https://maps.app.goo.gl/MTVGWdpd8vVqTouv9" --max-reviews 10 --verbose -o /dev/null
+   npx tsx src/index.ts scrape 'https://maps.app.goo.gl/MTVGWdpd8vVqTouv9' --max-reviews 10 --verbose -o /dev/null
    ```
 4. Verify reviews are extracted with correct fields (ratings, text, owner responses)
 5. Run `npm test` – existing tests for parser, schema, etc. should still pass

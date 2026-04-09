@@ -8,6 +8,8 @@ A command-line tool that scrapes Google Maps location reviews using browser auto
 - **Full review data** – author, rating, text, photos count, owner responses
 - **Bilingual support** – captures both translated and original language text
 - **Sort control** – newest, most relevant, highest, or lowest rated
+- **Multi-sort collection** – automatically switches sort orders to collect more reviews beyond Google's per-sort rendering limit
+- **Persistent authentication** – sign in to Google once, session reused across runs
 - **JSON and CSV output** – structured data ready for analysis
 - **Resumable batches** – interrupted batch runs pick up where they left off
 - **Schema validation** – verify output files against the expected schema
@@ -27,7 +29,7 @@ npx playwright install chromium
 Or run without installing:
 
 ```bash
-npx revcli scrape "https://maps.app.goo.gl/..." --max-reviews 50
+npx revcli scrape 'https://maps.app.goo.gl/...' --max-reviews 50
 ```
 
 > **Note:** The first run requires `npx playwright install chromium` to download the browser binary (~165 MB).
@@ -39,7 +41,7 @@ npx revcli scrape "https://maps.app.goo.gl/..." --max-reviews 50
 revcli auth
 
 # Scrape 50 reviews and save to file
-revcli scrape "https://maps.app.goo.gl/MTVGWdpd8vVqTouv9" -m 50 -o reviews.json
+revcli scrape 'https://maps.app.goo.gl/MTVGWdpd8vVqTouv9' -m 50 -o reviews.json
 
 # Batch scrape multiple locations
 revcli batch locations.txt -d ./output
@@ -88,7 +90,7 @@ revcli scrape 'https://maps.app.goo.gl/MTVGWdpd8vVqTouv9'
 revcli scrape 'https://maps.app.goo.gl/MTVGWdpd8vVqTouv9' -m 50 -o reviews.json
 revcli scrape 'https://maps.app.goo.gl/MTVGWdpd8vVqTouv9' --sort relevant --format csv -o reviews.csv
 revcli scrape 'ChIJN1t_tDeuEmsRUsoyG83frY4' -m 20 -o place.json
-revcli scrape "https://maps.app.goo.gl/MTVGWdpd8vVqTouv9" --headless --verbose --delay 5000
+revcli scrape 'https://maps.app.goo.gl/MTVGWdpd8vVqTouv9' --headless --verbose --delay 5000
 ```
 
 ### `revcli batch <file>`
@@ -234,6 +236,7 @@ revcli uses [Playwright](https://playwright.dev/) to automate a Chromium browser
 6. Extracts review data from the DOM in bulk via `page.evaluate()`
 7. Validates each review through [Zod](https://zod.dev/) schemas
 8. Deduplicates by review ID and repeats until all reviews are collected
+9. If max reviews isn't reached, switches to additional sort orders to collect more
 
 No Google API key is needed – the tool reads the same public page a regular browser would see. The browser shows by default (use `--headless` to hide it).
 
@@ -258,7 +261,7 @@ npx playwright install chromium
 ### Development workflow
 
 ```bash
-npm run dev -- scrape "https://maps.app.goo.gl/..." -m 5    # Run from source
+npm run dev -- scrape 'https://maps.app.goo.gl/...' -m 5    # Run from source
 npm test                                                      # Run all tests (108)
 npx vitest run tests/parser.test.ts                           # Run single test file
 npm run typecheck                                             # Type check
