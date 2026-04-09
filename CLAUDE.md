@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-npm run dev -- scrape <url> [options]   # Run CLI directly during development
+npm run dev -- scrape '<url>' [options] # Run CLI directly (single-quote URLs!)
 npm run dev -- auth                     # Authenticate with Google (opens browser)
 npm run dev -- auth status              # Check if signed in
 npm run build                           # Build to dist/ via tsup (ESM, shebang)
@@ -74,6 +74,8 @@ URL input → `parseGoogleMapsInput()` validates → `scrapeLocation(parsed)` la
 - **Type-safe options**: `SortOrder` and `OutputFormat` union types in `schema.ts` provide compile-time safety. Constants `SORT_ORDERS` and `OUTPUT_FORMATS` are the single source of truth.
 - **Rating=0 sentinel**: When stars selector is stale, reviews get `rating: 0` instead of being silently discarded. Parser and extractor both warn about this.
 - **Batch safety**: Filename deduplication prevents overwrites. Per-location timeout (`--location-timeout`, default 5 min) prevents indefinite hangs. Invalid URLs logged with warnings.
+- **Multi-sort collection**: When a sort order is exhausted but `maxReviews` isn't reached, the scroller automatically switches to additional sort orders (highest, lowest) to collect more reviews. Deduplication by `reviewId` prevents duplicates across sorts.
+- **Shell quoting**: Google Maps URLs contain `!` characters that zsh/bash interpret as history expansion. Always use single quotes (`'...'`) around URLs in CLI examples and commands.
 
 ## Conventions
 

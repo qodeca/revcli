@@ -81,11 +81,13 @@ Scrape reviews from a single Google Maps location.
 
 **Examples:**
 
+> **Important:** Always use **single quotes** (`'...'`) around Google Maps URLs. Double quotes cause zsh/bash to interpret `!` characters in the URL's `data=` parameter as history expansion, mangling the URL.
+
 ```bash
-revcli scrape "https://maps.app.goo.gl/MTVGWdpd8vVqTouv9"
-revcli scrape "https://maps.app.goo.gl/MTVGWdpd8vVqTouv9" -m 50 -o reviews.json
-revcli scrape "https://maps.app.goo.gl/MTVGWdpd8vVqTouv9" --sort relevant --format csv -o reviews.csv
-revcli scrape "ChIJN1t_tDeuEmsRUsoyG83frY4" -m 20 -o place.json
+revcli scrape 'https://maps.app.goo.gl/MTVGWdpd8vVqTouv9'
+revcli scrape 'https://maps.app.goo.gl/MTVGWdpd8vVqTouv9' -m 50 -o reviews.json
+revcli scrape 'https://maps.app.goo.gl/MTVGWdpd8vVqTouv9' --sort relevant --format csv -o reviews.csv
+revcli scrape 'ChIJN1t_tDeuEmsRUsoyG83frY4' -m 20 -o place.json
 revcli scrape "https://maps.app.goo.gl/MTVGWdpd8vVqTouv9" --headless --verbose --delay 5000
 ```
 
@@ -242,6 +244,7 @@ No Google API key is needed – the tool reads the same public page a regular br
 - **Relative timestamps** – Google Maps shows review times as "2 weeks ago" rather than exact dates. These are captured as-is.
 - **No translation toggle** – The tool captures whatever text Google displays (usually auto-translated). The original language text requires clicking "See original" which is not currently automated.
 - **Language detection** – The `originalLanguage` field uses a simple Arabic/Latin script heuristic, not full language identification.
+- **Shell quoting** – Google Maps URLs contain `!` characters that zsh/bash interpret as history expansion. Always wrap URLs in single quotes (`'...'`), not double quotes.
 
 ## Contributing
 
