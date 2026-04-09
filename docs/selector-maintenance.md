@@ -43,7 +43,7 @@ Look for the repeating container element that wraps each review. Previously `div
 | **Response text** | `div.wiI7pd` (note: div, not span – different from review text) | `div.wiI7pd` inside `div.CDe7pd` |
 | **Response time** | Span with relative time inside response | `span.DZSIDd` |
 | **Photos** | Photo thumbnail buttons | `button.Tya61d` |
-| **Sort button** | Button to open sort menu | `button[aria-label*="Sort" i]` (+ fallbacks) |
+| **Sort button** | Button to open sort menu (text always shows "Sort", not the selected option) | `button[aria-label*="Sort" i], button[data-value="Sort"]` |
 | **Sort option** | Menu item in sort dropdown | `div[role="menuitemradio"]` |
 | **Address** | Business address element | `button[data-item-id="address"] div.fontBodyMedium` |
 | **Scroll container** | Scrollable parent of review cards (4 fallbacks tried in order) | `div.m6QErb.DxyBCb.kA9KIf.dS8AEf` |
@@ -88,5 +88,5 @@ These selectors are hardcoded in `business-extractor.ts` rather than `selectors.
 - `h1` – business name (standard HTML tag)
 
 **Fragile** (likely to change):
-- All single-class selectors: `.jftiEf`, `.d4r55`, `.kvMYJc`, `.rsqaWe`, `.wiI7pd`, `.CDe7pd`, `.DZSIDd`, `.DU9Pgb`, `.Tya61d`, `.w8nwRe`
+- All single-class selectors: `.jftiEf`, `.d4r55`, `.kvMYJc`, `.rsqaWe`, `.wiI7pd`, `.CDe7pd`, `.DZSIDd`, `.DU9Pgb`, `.Tya61d`, `.w8nwRe`, `.lXJj5c`
 - Compound class selectors: `.m6QErb.DxyBCb.kA9KIf.dS8AEf`

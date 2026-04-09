@@ -35,7 +35,7 @@ src/scraper/scrape-location.ts  ── shared orchestrator, accepts ParsedUrl (u
 ├── navigator.ts            ── orchestrates consent → locale → limited-view check → tab → sort
 ├── consent.ts              ── Google consent handling, hl=en enforcement, g_ep/entry stripping
 ├── business-extractor.ts   ── business name/rating/totalReviews/address extraction
-├── scroller.ts             ── mouse wheel scrolling, deduplication by review ID, stale-scroll detection
+├── scroller.ts             ── mouse wheel scrolling, deduplication by review ID, exponential backoff stale-scroll detection, loading spinner awareness
 ├── extractor.ts            ── single page.evaluate() for bulk DOM extraction, staleness warnings
 ├── parser.ts               ── RawReview → validated Review via Zod, language detection
 └── selectors.ts            ── ALL Google Maps CSS selectors in one place (fragile, version-dated)
@@ -85,4 +85,5 @@ URL input → `parseGoogleMapsInput()` validates → `scrapeLocation(parsed)` la
 - Tests use vitest (121 tests across 12 files) – pure-function tests for parser, schema, URL, CSV, JSON, retry, rate-limiter, consent, unrecoverable, batch-utils, validate, scroller; Playwright-dependent modules are not unit tested
 - `parseInputFile()`, `slugify()`, and `deduplicateFilename()` in batch.ts are exported for testability
 - `appendHlParam()` in consent.ts and `isUnrecoverable()` in retry.ts are exported for testability
+- `calculateStaleDelay()` and `shouldContinueScrolling()` in scroller.ts are exported for testability
 - `detectLanguage()` in parser.ts is a simple Arabic/Latin heuristic, not full language detection
