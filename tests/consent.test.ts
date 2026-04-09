@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { appendHlParam } from "../src/scraper/consent.js";
+import { extractPlaceIdFromUrl } from "../src/utils/url.js";
 
 describe("appendHlParam", () => {
   it("adds hl=en to a long Google Maps URL", () => {
@@ -54,5 +55,16 @@ describe("appendHlParam", () => {
     expect(result).not.toContain("entry");
     expect(result).not.toContain("g_ep");
     expect(result).toContain("hl=en");
+  });
+
+  it("preserves ftid value extractable after URL encoding", () => {
+    const url =
+      "https://www.google.com/maps?ftid=0x3e2ee3641f7016d7:0x8e3a8bcf52dad296";
+    const result = appendHlParam(url);
+    expect(result).toContain("hl=en");
+    // URLSearchParams encodes : to %3A, but extractPlaceIdFromUrl
+    // decodes percent-encoded chars before matching
+    const placeId = extractPlaceIdFromUrl(result);
+    expect(placeId).toBe("0x3e2ee3641f7016d7:0x8e3a8bcf52dad296");
   });
 });
