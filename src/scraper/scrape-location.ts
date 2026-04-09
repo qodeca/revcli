@@ -4,6 +4,7 @@ import { launchBrowser, closeBrowser, trackBrowser } from "./browser.js";
 import { navigateToReviews } from "./navigator.js";
 import { scrollAndCollectReviews } from "./scroller.js";
 import { hasLimitedView, waitForUserAuth } from "./auth.js";
+import { SORT_ORDERS } from "../core/schema.js";
 import type { ScrapeResult, Review, SortOrder } from "../core/schema.js";
 
 export interface ScrapeLocationOptions {
@@ -11,6 +12,15 @@ export interface ScrapeLocationOptions {
   maxReviews?: number;
   headless: boolean;
   delay: number;
+}
+
+/**
+ * Build a list of additional sort orders to try when the primary sort
+ * is exhausted but maxReviews hasn't been reached. Each sort order
+ * surfaces a different subset of reviews from Google's virtualized list.
+ */
+function getExtraSortOrders(primarySort: SortOrder): SortOrder[] {
+  return SORT_ORDERS.filter((s) => s !== primarySort && s !== "relevant");
 }
 
 export async function scrapeLocation(
@@ -47,6 +57,7 @@ export async function scrapeLocation(
     const reviews: Review[] = await scrollAndCollectReviews(page, {
       maxReviews: options.maxReviews,
       delayMs: options.delay,
+      extraSortOrders: getExtraSortOrders(options.sort),
     });
 
     return {

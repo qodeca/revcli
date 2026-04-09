@@ -103,7 +103,7 @@ async function openReviewsTab(page: Page): Promise<void> {
   logger.debug("Reviews panel loaded");
 }
 
-async function setSortOrder(page: Page, sortOrder: SortOrder): Promise<void> {
+export async function setSortOrder(page: Page, sortOrder: SortOrder): Promise<void> {
   const sortIndex = SORT_OPTIONS[sortOrder];
   if (sortIndex === undefined) {
     logger.warn(`Unknown sort order "${sortOrder}", using default`);

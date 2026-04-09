@@ -1,18 +1,22 @@
 import type { Page } from "playwright";
-import type { Review } from "../core/schema.js";
+import type { Review, SortOrder } from "../core/schema.js";
 import { expandAllReviews, extractReviews } from "./extractor.js";
 import { parseReview } from "./parser.js";
 import { logger } from "../utils/logger.js";
 import { SELECTORS } from "./selectors.js";
+import { setSortOrder } from "./navigator.js";
 
 export interface ScrollOptions {
   maxReviews?: number;
   delayMs: number;
+  extraSortOrders?: SortOrder[];
 }
 
 /**
  * Scroll the reviews panel and collect reviews incrementally.
  * Uses deduplication to avoid collecting the same review twice.
+ * When a sort order is exhausted and maxReviews isn't reached,
+ * switches to additional sort orders to collect more reviews.
  */
 export async function scrollAndCollectReviews(
   page: Page,
@@ -20,8 +24,6 @@ export async function scrollAndCollectReviews(
 ): Promise<Review[]> {
   const collectedIds = new Set<string>();
   const reviews: Review[] = [];
-  let staleScrollCount = 0;
-  const maxStaleScrolls = 5;
 
   // Find the scrollable reviews container
   const scrollContainer = await findScrollContainer(page);
@@ -32,14 +34,60 @@ export async function scrollAndCollectReviews(
 
   logger.info("Scrolling to collect reviews...");
 
+  // Collect from the current (primary) sort order
+  const done = await collectFromCurrentSort(
+    page,
+    scrollContainer,
+    collectedIds,
+    reviews,
+    options,
+  );
+
+  if (done || !options.extraSortOrders?.length) {
+    return reviews;
+  }
+
+  // Try additional sort orders to collect more reviews
+  for (const sortOrder of options.extraSortOrders) {
+    logger.info(
+      `Switching to "${sortOrder}" sort to collect more reviews...`,
+    );
+    await setSortOrder(page, sortOrder);
+    await page.waitForTimeout(3000);
+
+    const reachedMax = await collectFromCurrentSort(
+      page,
+      scrollContainer,
+      collectedIds,
+      reviews,
+      options,
+    );
+
+    if (reachedMax) break;
+  }
+
+  return reviews;
+}
+
+/**
+ * Scroll and collect reviews from the currently active sort order.
+ * Returns true if maxReviews was reached.
+ */
+async function collectFromCurrentSort(
+  page: Page,
+  scrollContainer: string,
+  collectedIds: Set<string>,
+  reviews: Review[],
+  options: ScrollOptions,
+): Promise<boolean> {
+  let staleScrollCount = 0;
+  const maxStaleScrolls = 5;
+
   while (true) {
-    // Expand truncated reviews
     await expandAllReviews(page);
 
-    // Extract all visible reviews
     const rawReviews = await extractReviews(page);
 
-    // Parse and deduplicate
     let newCount = 0;
     for (const raw of rawReviews) {
       const parsed = parseReview(raw);
@@ -52,7 +100,7 @@ export async function scrollAndCollectReviews(
 
       if (options.maxReviews && reviews.length >= options.maxReviews) {
         logger.info(`Reached max reviews limit (${options.maxReviews})`);
-        return reviews;
+        return true;
       }
     }
 
@@ -62,24 +110,22 @@ export async function scrollAndCollectReviews(
     } else {
       staleScrollCount++;
       if (staleScrollCount >= maxStaleScrolls) {
-        logger.info("No new reviews after scrolling – reached the end");
-        break;
+        logger.info(
+          `No new reviews after scrolling – exhausted this sort order (${reviews.length} total)`,
+        );
+        return false;
       }
     }
 
-    // Scroll down and wait for new content to load
     await scrollDown(page, scrollContainer);
 
-    // Wait with jitter for content to load
     const baseDelay = options.delayMs || 3000;
-    const delay = Math.round(baseDelay + baseDelay * 0.3 * (Math.random() - 0.5));
+    const delay = Math.round(
+      baseDelay + baseDelay * 0.3 * (Math.random() - 0.5),
+    );
     await page.waitForTimeout(delay);
-
-    // Brief extra wait for content to settle
     await page.waitForTimeout(500);
   }
-
-  return reviews;
 }
 
 /**
@@ -137,7 +183,6 @@ async function scrollDown(
   page: Page,
   containerSelector: string,
 ): Promise<void> {
-  // First, get the container's bounding box to target the scroll
   const box = await page.evaluate((sel) => {
     const container = document.querySelector(sel);
     if (!container) return null;
@@ -150,11 +195,9 @@ async function scrollDown(
 
   if (!box) return;
 
-  // Use mouse wheel to scroll – this properly triggers Google Maps' lazy loading
   await page.mouse.move(box.x, box.y);
   await page.mouse.wheel(0, 800);
 
-  // Also set scrollTop as a fallback
   await page.evaluate((sel) => {
     const container = document.querySelector(sel);
     if (container) {

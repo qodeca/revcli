@@ -16,8 +16,9 @@ export async function extractBusinessInfo(
       const name =
         document.querySelector("h1")?.textContent?.trim() ?? "Unknown";
 
+      // Rating element can be either span or div with role="img"
       const ratingEl = document.querySelector(
-        'div[role="img"][aria-label*="star"], span[aria-hidden="true"]',
+        '[role="img"][aria-label*="star"]',
       );
       let rating: number | null = null;
       if (ratingEl) {
@@ -26,10 +27,16 @@ export async function extractBusinessInfo(
           ?.match(/([\d.]+)/);
         if (ratingMatch) {
           rating = parseFloat(ratingMatch[1]);
-        } else {
-          const text = ratingEl.textContent?.trim();
-          if (text && /^\d+\.?\d*$/.test(text)) {
+        }
+      }
+      // Fallback: look for a plain text span with the rating number
+      if (rating === null) {
+        const spans = document.querySelectorAll("span");
+        for (const s of spans) {
+          const text = s.textContent?.trim() ?? "";
+          if (/^\d\.\d$/.test(text) && s.getAttribute("aria-hidden") === "true") {
             rating = parseFloat(text);
+            break;
           }
         }
       }
