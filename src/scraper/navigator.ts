@@ -103,6 +103,13 @@ async function openReviewsTab(page: Page): Promise<void> {
   logger.debug("Reviews panel loaded");
 }
 
+const SORT_VERIFY_TEXT: Record<SortOrder, string> = {
+  newest: "newest",
+  highest: "highest",
+  lowest: "lowest",
+  relevant: "relevant",
+};
+
 export async function setSortOrder(page: Page, sortOrder: SortOrder): Promise<void> {
   const sortIndex = SORT_OPTIONS[sortOrder];
   if (sortIndex === undefined) {
@@ -110,20 +117,47 @@ export async function setSortOrder(page: Page, sortOrder: SortOrder): Promise<vo
     return;
   }
 
-  try {
-    const sortButton = page.locator(SELECTORS.sortButton);
-    await sortButton.first().click({ timeout: 5000 });
+  const sortButton = page.locator(SELECTORS.sortButton);
+  await sortButton.first().click({ timeout: 5000 });
 
-    await page.waitForSelector(SELECTORS.sortMenuItem, { timeout: 3000 });
+  await page.waitForSelector(SELECTORS.sortMenuItem, { timeout: 3000 });
 
-    const menuItems = page.locator(SELECTORS.sortMenuItem);
-    const count = await menuItems.count();
-    if (sortIndex < count) {
-      await menuItems.nth(sortIndex).click();
-      logger.debug(`Sort order set to: ${sortOrder}`);
-      await page.waitForTimeout(3000);
-    }
-  } catch {
-    logger.warn(`Could not set sort order to "${sortOrder}"`);
+  const menuItems = page.locator(SELECTORS.sortMenuItem);
+  const count = await menuItems.count();
+  if (sortIndex >= count) {
+    throw new Error(
+      `Sort verification failed: sort menu has ${count} items but "${sortOrder}" requires index ${sortIndex}`,
+    );
   }
+  await menuItems.nth(sortIndex).click();
+
+  // Wait for the sort menu to close
+  await page.waitForSelector(SELECTORS.sortMenuItem, { state: "hidden", timeout: 3000 }).catch(() => {});
+
+  const expectedKeyword = SORT_VERIFY_TEXT[sortOrder];
+
+  // Google Maps announces sort changes via an ARIA live region
+  // e.g., "The reviews are now sorted from newest to oldest."
+  try {
+    await page.waitForFunction(
+      ({ sel, keyword }) => {
+        const liveRegion = document.querySelector(sel);
+        if (!liveRegion) return false;
+        return (liveRegion.textContent ?? "").trim().toLowerCase().includes(keyword);
+      },
+      { sel: SELECTORS.sortLiveRegion, keyword: expectedKeyword },
+      { timeout: 5000 },
+    );
+  } catch {
+    // Matched by isUnrecoverable() in retry.ts
+    throw new Error(
+      `Sort verification failed: expected "${sortOrder}" but no ARIA announcement found containing "${expectedKeyword}"`,
+    );
+  }
+
+  // Wait for reviews to reload after sort change
+  await page.waitForSelector(SELECTORS.reviewCard, { timeout: 10000 });
+  await page.waitForTimeout(1000);
+
+  logger.debug(`Sort order verified: ${sortOrder}`);
 }

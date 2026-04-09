@@ -43,8 +43,16 @@ export const SELECTORS = {
   // Navigation
   tab: 'button[role="tab"]',
   sortMenuItem: 'div[role="menuitemradio"]',
-  sortButton:
-    'button[aria-label*="Sort" i], button[data-value="Sort"], button:has-text("Most relevant"), button:has-text("Newest")',
+  sortButton: 'button[aria-label*="Sort" i], button[data-value="Sort"]',
+  // ARIA live region where Google Maps announces sort changes
+  // e.g., "The reviews are now sorted from newest to oldest."
+  sortLiveRegion: 'div[aria-live="polite"][aria-atomic="true"]',
   addressButton:
     'button[data-item-id="address"] div.fontBodyMedium, [data-item-id="address"]',
+
+  // Loading indicator shown during lazy-loading of reviews
+  // Multiple selectors as fallbacks since Google changes these frequently
+  // Material Design spinner at bottom of scroll container during lazy-loading
+  // CSS animation state toggles between paused/running
+  loadingIndicator: "div.lXJj5c",
 } as const;

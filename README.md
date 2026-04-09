@@ -8,7 +8,7 @@ A command-line tool that scrapes Google Maps location reviews using browser auto
 - **Full review data** – author, rating, text, photos count, owner responses
 - **Bilingual support** – captures both translated and original language text
 - **Sort control** – newest, most relevant, highest, or lowest rated
-- **Multi-sort collection** – automatically switches sort orders to collect more reviews beyond Google's per-sort rendering limit
+- **Sort verification** – verifies the selected sort order is active before scraping begins
 - **Persistent authentication** – sign in to Google once, session reused across runs
 - **JSON and CSV output** – structured data ready for analysis
 - **Resumable batches** – interrupted batch runs pick up where they left off
@@ -235,8 +235,7 @@ revcli uses [Playwright](https://playwright.dev/) to automate a Chromium browser
 5. Scrolls the review panel using mouse wheel events to trigger lazy loading
 6. Extracts review data from the DOM in bulk via `page.evaluate()`
 7. Validates each review through [Zod](https://zod.dev/) schemas
-8. Deduplicates by review ID and repeats until all reviews are collected
-9. If max reviews isn't reached, switches to additional sort orders to collect more
+8. Deduplicates by review ID and repeats until all reviews are collected or no more are available
 
 No Google API key is needed – the tool reads the same public page a regular browser would see. The browser shows by default (use `--headless` to hide it).
 
@@ -262,7 +261,7 @@ npx playwright install chromium
 
 ```bash
 npm run dev -- scrape 'https://maps.app.goo.gl/...' -m 5    # Run from source
-npm test                                                      # Run all tests (108)
+npm test                                                      # Run all tests (121)
 npx vitest run tests/parser.test.ts                           # Run single test file
 npm run typecheck                                             # Type check
 npm run build                                                 # Build to dist/

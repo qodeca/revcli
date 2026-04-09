@@ -1,22 +1,81 @@
 import type { Page } from "playwright";
-import type { Review, SortOrder } from "../core/schema.js";
-import { expandAllReviews, extractReviews } from "./extractor.js";
+import type { Review } from "../core/schema.js";
+import {
+  expandAllReviews,
+  extractReviews,
+  type RawReview,
+} from "./extractor.js";
 import { parseReview } from "./parser.js";
 import { logger } from "../utils/logger.js";
 import { SELECTORS } from "./selectors.js";
-import { setSortOrder } from "./navigator.js";
+
+const MAX_STALE_SCROLLS = 6;
+const MAX_SPINNER_WITHOUT_PROGRESS = 3;
 
 export interface ScrollOptions {
   maxReviews?: number;
   delayMs: number;
-  extraSortOrders?: SortOrder[];
+}
+
+/**
+ * Calculate delay for a stale scroll using exponential backoff.
+ * Formula: baseDelay * 2^max(0, staleCount - 1), capped at baseDelay * maxMultiplier
+ */
+export function calculateStaleDelay(
+  staleScrollCount: number,
+  baseDelay: number,
+  maxMultiplier: number = 4,
+): number {
+  const multiplier = Math.pow(2, Math.max(0, staleScrollCount - 1));
+  return Math.min(baseDelay * multiplier, baseDelay * maxMultiplier);
+}
+
+/**
+ * Determine if scrolling should continue based on stale scroll count.
+ */
+export function shouldContinueScrolling(
+  staleScrollCount: number,
+  maxStaleScrolls: number = MAX_STALE_SCROLLS,
+): boolean {
+  return staleScrollCount < maxStaleScrolls;
+}
+
+/**
+ * Check if a loading indicator is visible in the reviews panel.
+ * Best-effort check – if selector doesn't match, returns false (graceful degradation).
+ */
+async function isLoadingVisible(page: Page): Promise<boolean> {
+  try {
+    return await page
+      .locator(SELECTORS.loadingIndicator)
+      .first()
+      .isVisible({ timeout: 100 });
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Wait for the loading indicator to disappear.
+ * Gracefully degrades if the selector doesn't match or times out.
+ */
+async function waitForLoadingComplete(
+  page: Page,
+  timeout: number = 5000,
+): Promise<void> {
+  try {
+    await page
+      .locator(SELECTORS.loadingIndicator)
+      .first()
+      .waitFor({ state: "hidden", timeout });
+  } catch {
+    // Timeout or selector not found – graceful degradation, continue
+  }
 }
 
 /**
  * Scroll the reviews panel and collect reviews incrementally.
  * Uses deduplication to avoid collecting the same review twice.
- * When a sort order is exhausted and maxReviews isn't reached,
- * switches to additional sort orders to collect more reviews.
  */
 export async function scrollAndCollectReviews(
   page: Page,
@@ -25,7 +84,6 @@ export async function scrollAndCollectReviews(
   const collectedIds = new Set<string>();
   const reviews: Review[] = [];
 
-  // Find the scrollable reviews container
   const scrollContainer = await findScrollContainer(page);
   if (!scrollContainer) {
     logger.warn("Could not find reviews scroll container");
@@ -33,45 +91,45 @@ export async function scrollAndCollectReviews(
   }
 
   logger.info("Scrolling to collect reviews...");
-
-  // Collect from the current (primary) sort order
-  const done = await collectFromCurrentSort(
+  await collectFromCurrentSort(
     page,
     scrollContainer,
     collectedIds,
     reviews,
     options,
   );
-
-  if (done || !options.extraSortOrders?.length) {
-    return reviews;
-  }
-
-  // Try additional sort orders to collect more reviews
-  for (const sortOrder of options.extraSortOrders) {
-    logger.info(
-      `Switching to "${sortOrder}" sort to collect more reviews...`,
-    );
-    await setSortOrder(page, sortOrder);
-    await page.waitForTimeout(3000);
-
-    const reachedMax = await collectFromCurrentSort(
-      page,
-      scrollContainer,
-      collectedIds,
-      reviews,
-      options,
-    );
-
-    if (reachedMax) break;
-  }
-
   return reviews;
 }
 
 /**
+ * Extract, parse, deduplicate, and collect new reviews from raw DOM data.
+ * Returns the count of newly collected reviews, or -1 if maxReviews was reached.
+ */
+function collectNewReviews(
+  rawReviews: RawReview[],
+  collectedIds: Set<string>,
+  reviews: Review[],
+  maxReviews?: number,
+): number {
+  let newCount = 0;
+  for (const raw of rawReviews) {
+    const parsed = parseReview(raw);
+    if (!parsed) continue;
+    if (collectedIds.has(parsed.id)) continue;
+
+    collectedIds.add(parsed.id);
+    reviews.push(parsed);
+    newCount++;
+
+    if (maxReviews != null && reviews.length >= maxReviews) {
+      return -1;
+    }
+  }
+  return newCount;
+}
+
+/**
  * Scroll and collect reviews from the currently active sort order.
- * Returns true if maxReviews was reached.
  */
 async function collectFromCurrentSort(
   page: Page,
@@ -79,51 +137,86 @@ async function collectFromCurrentSort(
   collectedIds: Set<string>,
   reviews: Review[],
   options: ScrollOptions,
-): Promise<boolean> {
+): Promise<void> {
   let staleScrollCount = 0;
-  const maxStaleScrolls = 5;
+  let spinnerWithoutProgressCount = 0;
 
   while (true) {
     await expandAllReviews(page);
 
     const rawReviews = await extractReviews(page);
+    const newCount = collectNewReviews(
+      rawReviews,
+      collectedIds,
+      reviews,
+      options.maxReviews,
+    );
 
-    let newCount = 0;
-    for (const raw of rawReviews) {
-      const parsed = parseReview(raw);
-      if (!parsed) continue;
-      if (collectedIds.has(parsed.id)) continue;
-
-      collectedIds.add(parsed.id);
-      reviews.push(parsed);
-      newCount++;
-
-      if (options.maxReviews && reviews.length >= options.maxReviews) {
-        logger.info(`Reached max reviews limit (${options.maxReviews})`);
-        return true;
-      }
+    if (newCount === -1) {
+      logger.info(`Reached max reviews limit (${options.maxReviews})`);
+      return;
     }
 
     if (newCount > 0) {
       logger.debug(`+${newCount} new reviews (total: ${reviews.length})`);
       staleScrollCount = 0;
+      spinnerWithoutProgressCount = 0;
     } else {
-      staleScrollCount++;
-      if (staleScrollCount >= maxStaleScrolls) {
-        logger.info(
-          `No new reviews after scrolling – exhausted this sort order (${reviews.length} total)`,
+      const loading = await isLoadingVisible(page);
+      if (loading) {
+        await waitForLoadingComplete(page, 5000);
+
+        // Re-extract after loading completes
+        const retryRaw = await extractReviews(page);
+        const retryNewCount = collectNewReviews(
+          retryRaw,
+          collectedIds,
+          reviews,
+          options.maxReviews,
         );
-        return false;
+
+        if (retryNewCount === -1) {
+          logger.info(`Reached max reviews limit (${options.maxReviews})`);
+          return;
+        }
+
+        if (retryNewCount > 0) {
+          logger.debug(
+            `+${retryNewCount} new reviews after loading (total: ${reviews.length})`,
+          );
+          staleScrollCount = 0;
+          spinnerWithoutProgressCount = 0;
+        } else {
+          // Spinner visible but no new reviews – cap to prevent infinite loop
+          spinnerWithoutProgressCount++;
+          if (spinnerWithoutProgressCount >= MAX_SPINNER_WITHOUT_PROGRESS) {
+            staleScrollCount++;
+            spinnerWithoutProgressCount = 0;
+          }
+        }
+      } else {
+        staleScrollCount++;
+        if (!shouldContinueScrolling(staleScrollCount, MAX_STALE_SCROLLS)) {
+          logger.info(
+            `No new reviews after scrolling – no more reviews available (${reviews.length} total)`,
+          );
+          return;
+        }
       }
     }
 
     await scrollDown(page, scrollContainer);
 
     const baseDelay = options.delayMs || 3000;
+    const delayBase =
+      staleScrollCount > 0
+        ? calculateStaleDelay(staleScrollCount, baseDelay)
+        : baseDelay;
     const delay = Math.round(
-      baseDelay + baseDelay * 0.3 * (Math.random() - 0.5),
+      delayBase + delayBase * 0.3 * (Math.random() - 0.5),
     );
     await page.waitForTimeout(delay);
+    // Allow DOM to settle after scroll animation
     await page.waitForTimeout(500);
   }
 }
