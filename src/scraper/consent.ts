@@ -54,9 +54,12 @@ export function appendHlParam(url: string): string {
   if (url.includes("maps.app.goo.gl")) return url;
   try {
     const u = new URL(url);
-    if (!u.searchParams.has("hl")) {
-      u.searchParams.set("hl", "en");
-    }
+    u.searchParams.set("hl", "en");
+    // Remove tracking/experiment params that trigger Google's "limited view",
+    // which hides the Reviews tab entirely. The combination of entry=ttu and
+    // g_ep causes this – stripping both is the safe fix.
+    u.searchParams.delete("g_ep");
+    u.searchParams.delete("entry");
     return u.toString();
   } catch {
     return url;

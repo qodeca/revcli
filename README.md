@@ -1,6 +1,6 @@
 # revcli
 
-A command-line tool that scrapes Google Maps location reviews using headless browser automation. No API key required.
+A command-line tool that scrapes Google Maps location reviews using browser automation. No API key required.
 
 ## Features
 
@@ -35,6 +35,9 @@ npx revcli scrape "https://maps.app.goo.gl/..." --max-reviews 50
 ## Quick start
 
 ```bash
+# Authenticate with Google (required once – opens browser)
+revcli auth
+
 # Scrape 50 reviews and save to file
 revcli scrape "https://maps.app.goo.gl/MTVGWdpd8vVqTouv9" -m 50 -o reviews.json
 
@@ -72,7 +75,7 @@ Scrape reviews from a single Google Maps location.
 | `-s, --sort <order>` | `newest` | Review sort order. Choices: `newest`, `relevant`, `highest`, `lowest` |
 | `-o, --output <path>` | stdout | Write output to file instead of stdout |
 | `-f, --format <type>` | `json` | Output format. Choices: `json`, `csv` |
-| `--headed` | `false` | Show the browser window (useful for debugging selector issues) |
+| `--headless` | `false` | Hide the browser window. Browser shows by default so you can observe scraping and handle auth prompts |
 | `--delay <ms>` | `3000` | Delay in milliseconds between scroll actions. Increase if getting rate-limited |
 | `-v, --verbose` | `false` | Enable debug-level logging |
 
@@ -83,7 +86,7 @@ revcli scrape "https://maps.app.goo.gl/MTVGWdpd8vVqTouv9"
 revcli scrape "https://maps.app.goo.gl/MTVGWdpd8vVqTouv9" -m 50 -o reviews.json
 revcli scrape "https://maps.app.goo.gl/MTVGWdpd8vVqTouv9" --sort relevant --format csv -o reviews.csv
 revcli scrape "ChIJN1t_tDeuEmsRUsoyG83frY4" -m 20 -o place.json
-revcli scrape "https://maps.app.goo.gl/MTVGWdpd8vVqTouv9" --headed --verbose --delay 5000
+revcli scrape "https://maps.app.goo.gl/MTVGWdpd8vVqTouv9" --headless --verbose --delay 5000
 ```
 
 ### `revcli batch <file>`
@@ -104,7 +107,7 @@ Scrape reviews from multiple locations listed in a file. Produces one output fil
 | `-m, --max-reviews <n>` | all | Maximum number of reviews per location. Must be a positive integer |
 | `-s, --sort <order>` | `newest` | Review sort order. Choices: `newest`, `relevant`, `highest`, `lowest` |
 | `-f, --format <type>` | `json` | Output format. Choices: `json`, `csv` |
-| `--headed` | `false` | Show the browser window |
+| `--headless` | `false` | Hide the browser window |
 | `--delay <ms>` | `3000` | Delay in milliseconds between scroll actions within a location |
 | `--location-delay <ms>` | `10000` | Delay in milliseconds between locations. Increase to reduce rate-limiting risk |
 | `--location-timeout <ms>` | `300000` | Timeout per location in milliseconds (default: 5 minutes). Prevents indefinite hangs |
@@ -150,6 +153,26 @@ Validate a JSON output file against the expected schema. Exits with code 1 on fa
 revcli validate reviews.json
 revcli validate output/bfit-yasmeen-mens.json
 ```
+
+### `revcli auth`
+
+Manage Google account authentication. Required for EEA users where Google shows a "limited view" without sign-in.
+
+| Subcommand | Description |
+|------------|-------------|
+| *(none)* | Open browser and sign in to Google interactively |
+| `status` | Check if currently signed in (headless, exit code 1 if not) |
+| `logout` | Clear saved browser session |
+
+**Examples:**
+
+```bash
+revcli auth                # Sign in (opens browser)
+revcli auth status         # Check auth state
+revcli auth logout         # Clear session
+```
+
+**How it works:** revcli uses a persistent Chrome profile at `~/.revcli/chrome-profile/`. Sign in once with `revcli auth`, and all subsequent scrapes reuse that session. Google auth cookies persist between CLI runs.
 
 ## Output schema
 
@@ -199,17 +222,18 @@ revcli validate output/bfit-yasmeen-mens.json
 
 ## How it works
 
-revcli uses [Playwright](https://playwright.dev/) to automate a headless Chromium browser:
+revcli uses [Playwright](https://playwright.dev/) to automate a Chromium browser with a persistent profile:
 
-1. Navigates to the Google Maps place URL
-2. Handles cookie consent and forces English locale
-3. Opens the Reviews tab and sets the sort order
-4. Scrolls the review panel using mouse wheel events to trigger lazy loading
-5. Extracts review data from the DOM in bulk via `page.evaluate()`
-6. Validates each review through [Zod](https://zod.dev/) schemas
-7. Deduplicates by review ID and repeats until all reviews are collected
+1. Launches browser using a saved Chrome profile (`~/.revcli/chrome-profile/`)
+2. Navigates to the Google Maps place URL (strips tracking params, forces English locale)
+3. Handles cookie consent and checks for Google's "limited view" (EEA auth wall)
+4. Opens the Reviews tab and sets the sort order
+5. Scrolls the review panel using mouse wheel events to trigger lazy loading
+6. Extracts review data from the DOM in bulk via `page.evaluate()`
+7. Validates each review through [Zod](https://zod.dev/) schemas
+8. Deduplicates by review ID and repeats until all reviews are collected
 
-No Google API key is needed – the tool reads the same public page a regular browser would see.
+No Google API key is needed – the tool reads the same public page a regular browser would see. The browser shows by default (use `--headless` to hide it).
 
 ## Limitations
 
@@ -232,7 +256,7 @@ npx playwright install chromium
 
 ```bash
 npm run dev -- scrape "https://maps.app.goo.gl/..." -m 5    # Run from source
-npm test                                                      # Run all tests (106)
+npm test                                                      # Run all tests (108)
 npx vitest run tests/parser.test.ts                           # Run single test file
 npm run typecheck                                             # Type check
 npm run build                                                 # Build to dist/
@@ -242,10 +266,12 @@ npm run build                                                 # Build to dist/
 
 ```
 src/
-├── commands/       # CLI command handlers (scrape, batch, validate)
+├── commands/       # CLI command handlers (scrape, batch, validate, auth)
 ├── scraper/        # Playwright automation
+│   ├── browser.ts              # Persistent Chrome profile, anti-detection
+│   ├── auth.ts                 # Google sign-in detection, limited view handling
 │   ├── navigator.ts            # Orchestrates page navigation flow
-│   ├── consent.ts              # Google consent + locale handling
+│   ├── consent.ts              # Google consent + locale + URL normalization
 │   ├── business-extractor.ts   # Business info extraction from DOM
 │   ├── scroller.ts, extractor.ts, parser.ts  # Review collection pipeline
 │   └── selectors.ts            # All Google Maps CSS selectors (update here when they break)

@@ -2,6 +2,11 @@ import { Command, InvalidArgumentError } from "commander";
 import { scrapeCommand } from "./commands/scrape.js";
 import { batchCommand } from "./commands/batch.js";
 import { validateCommand } from "./commands/validate.js";
+import {
+  authLoginCommand,
+  authStatusCommand,
+  authLogoutCommand,
+} from "./commands/auth.js";
 import { setVerbose } from "./utils/logger.js";
 import { SORT_ORDERS, OUTPUT_FORMATS } from "./core/schema.js";
 import type { SortOrder, OutputFormat } from "./core/schema.js";
@@ -37,7 +42,7 @@ program
     `output format: ${OUTPUT_FORMATS.join(", ")}`,
     "json",
   )
-  .option("--headed", "show browser window for debugging", false)
+  .option("--headless", "run browser without UI", false)
   .option(
     "--delay <ms>",
     "delay between scroll actions in ms",
@@ -58,7 +63,7 @@ program
       sort: opts.sort as SortOrder,
       output: opts.output,
       format: opts.format as OutputFormat,
-      headed: opts.headed,
+      headless: opts.headless,
       delay: opts.delay,
     });
   });
@@ -83,7 +88,7 @@ program
     `output format: ${OUTPUT_FORMATS.join(", ")}`,
     "json",
   )
-  .option("--headed", "show browser window for debugging", false)
+  .option("--headless", "run browser without UI", false)
   .option(
     "--delay <ms>",
     "delay between scroll actions in ms",
@@ -117,7 +122,7 @@ program
       maxReviews: opts.maxReviews,
       sort: opts.sort as SortOrder,
       format: opts.format as OutputFormat,
-      headed: opts.headed,
+      headless: opts.headless,
       delay: opts.delay,
       locationDelay: opts.locationDelay,
       locationTimeout: opts.locationTimeout,
@@ -131,6 +136,31 @@ program
   .argument("<file>", "JSON file to validate")
   .action(async (file: string) => {
     await validateCommand(file);
+  });
+
+const auth = program
+  .command("auth")
+  .description("Manage Google account authentication")
+  .option("-v, --verbose", "verbose logging", false)
+  .action(async (opts) => {
+    setVerbose(opts.verbose);
+    await authLoginCommand();
+  });
+
+auth
+  .command("status")
+  .description("Check if signed in to Google")
+  .action(async () => {
+    setVerbose(auth.opts().verbose);
+    await authStatusCommand();
+  });
+
+auth
+  .command("logout")
+  .description("Clear saved browser session")
+  .action(async () => {
+    setVerbose(auth.opts().verbose);
+    await authLogoutCommand();
   });
 
 program.parse();

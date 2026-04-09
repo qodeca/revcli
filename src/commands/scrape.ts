@@ -11,7 +11,7 @@ export interface ScrapeOptions {
   sort: SortOrder;
   output?: string;
   format: OutputFormat;
-  headed: boolean;
+  headless: boolean;
   delay: number;
 }
 
@@ -29,7 +29,7 @@ export async function scrapeCommand(
       scrapeLocation(parsed, {
         sort: options.sort,
         maxReviews: options.maxReviews,
-        headed: options.headed,
+        headless: options.headless,
         delay: options.delay,
       }),
     "scrape",

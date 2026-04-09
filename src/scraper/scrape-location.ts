@@ -3,12 +3,13 @@ import { logger } from "../utils/logger.js";
 import { launchBrowser, closeBrowser, trackBrowser } from "./browser.js";
 import { navigateToReviews } from "./navigator.js";
 import { scrollAndCollectReviews } from "./scroller.js";
+import { hasLimitedView, waitForUserAuth } from "./auth.js";
 import type { ScrapeResult, Review, SortOrder } from "../core/schema.js";
 
 export interface ScrapeLocationOptions {
   sort: SortOrder;
   maxReviews?: number;
-  headed: boolean;
+  headless: boolean;
   delay: number;
 }
 
@@ -17,11 +18,28 @@ export async function scrapeLocation(
   options: ScrapeLocationOptions,
 ): Promise<ScrapeResult> {
   const startTime = Date.now();
-  const { browser, page } = await launchBrowser({ headed: options.headed });
-  trackBrowser(browser);
+  const { context, page } = await launchBrowser({
+    headless: options.headless,
+  });
+  trackBrowser(context);
 
   try {
     const businessInfo = await navigateToReviews(page, parsed, options.sort);
+
+    // Check for limited view after navigation
+    if (await hasLimitedView(page)) {
+      if (options.headless) {
+        throw new Error(
+          "Google Maps is showing a limited view (no Reviews tab). " +
+            "Run `revcli auth` first to sign in, or run without --headless.",
+        );
+      }
+      await waitForUserAuth(page);
+
+      // Re-navigate after sign-in
+      await navigateToReviews(page, parsed, options.sort);
+    }
+
     logger.info(
       `Found: ${businessInfo.name} (${businessInfo.totalReviews ?? "?"} reviews)`,
     );
@@ -45,6 +63,6 @@ export async function scrapeLocation(
       },
     };
   } finally {
-    await closeBrowser(browser);
+    await closeBrowser(context);
   }
 }

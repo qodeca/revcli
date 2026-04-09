@@ -11,12 +11,12 @@ All selectors live in **`src/scraper/selectors.ts`** – the single file to upda
 - Warning: "No reviews extracted but page has content – selectors may be stale"
 - Warning: "N reviews have rating=0 – stars selector may be stale"
 
-**Quick check – run with `--headed --verbose`:**
+**Quick check – run with `--verbose`:**
 ```bash
-npx tsx src/index.ts scrape "https://maps.app.goo.gl/MTVGWdpd8vVqTouv9" --max-reviews 5 --headed --verbose
+npx tsx src/index.ts scrape "https://maps.app.goo.gl/MTVGWdpd8vVqTouv9" --max-reviews 5 --verbose
 ```
 
-Watch the browser: if reviews are visually present but the CLI reports 0, selectors are stale.
+The browser shows by default. If reviews are visually present but the CLI reports 0, selectors are stale. Use `--headless` only if you don't need to see the browser.
 
 ## Finding new selectors
 

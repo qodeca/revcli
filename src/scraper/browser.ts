@@ -1,34 +1,37 @@
-import { chromium, type Browser, type Page } from "playwright";
+import { join } from "node:path";
+import { homedir } from "node:os";
+import { chromium, type BrowserContext, type Page } from "playwright";
 import { logger } from "../utils/logger.js";
 
 export interface BrowserOptions {
-  headed: boolean;
+  headless: boolean;
 }
 
 export interface BrowserSession {
-  browser: Browser;
+  context: BrowserContext;
   page: Page;
 }
+
+export const PROFILE_DIR = join(homedir(), ".revcli", "chrome-profile");
 
 export async function launchBrowser(
   options: BrowserOptions,
 ): Promise<BrowserSession> {
-  logger.debug("Launching browser...");
+  logger.debug("Launching browser with persistent profile...");
 
-  const browser = await chromium.launch({
-    headless: !options.headed,
+  const context = await chromium.launchPersistentContext(PROFILE_DIR, {
+    headless: options.headless,
     args: [
       "--disable-blink-features=AutomationControlled",
       "--no-sandbox",
       "--disable-dev-shm-usage",
+      "--lang=en-US",
     ],
-  });
-
-  const context = await browser.newContext({
     viewport: { width: 1366, height: 768 },
     locale: "en-US",
+    extraHTTPHeaders: { "Accept-Language": "en-US,en;q=0.9" },
     userAgent:
-      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
   });
 
   // Remove navigator.webdriver flag
@@ -38,35 +41,33 @@ export async function launchBrowser(
     });
   });
 
-  const page = await context.newPage();
+  const page = context.pages()[0] ?? (await context.newPage());
   logger.debug("Browser launched");
 
-  return { browser, page };
+  return { context, page };
 }
 
-const activeBrowsers = new Set<Browser>();
+const activeContexts = new Set<BrowserContext>();
 
 // Clean up browsers on unexpected termination
 process.once("SIGINT", () => {
-  const cleanups = [...activeBrowsers].map((b) =>
-    b.close().catch(() => {}),
-  );
+  const cleanups = [...activeContexts].map((c) => c.close().catch(() => {}));
   Promise.all(cleanups).finally(() => {
     process.exit(130);
   });
 });
 
-export function trackBrowser(browser: Browser): void {
-  activeBrowsers.add(browser);
+export function trackBrowser(context: BrowserContext): void {
+  activeContexts.add(context);
 }
 
-export async function closeBrowser(browser: Browser): Promise<void> {
+export async function closeBrowser(context: BrowserContext): Promise<void> {
   try {
-    await browser.close();
+    await context.close();
     logger.debug("Browser closed");
   } catch {
     // Browser may already be closed
   } finally {
-    activeBrowsers.delete(browser);
+    activeContexts.delete(context);
   }
 }

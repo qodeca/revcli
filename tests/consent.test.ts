@@ -15,11 +15,11 @@ describe("appendHlParam", () => {
     expect(matches).toHaveLength(1);
   });
 
-  it("preserves existing hl value", () => {
+  it("overrides non-English hl value to en", () => {
     const url = "https://www.google.com/maps/place/Test/@0,0,15z?hl=de";
     const result = appendHlParam(url);
-    expect(result).toContain("hl=de");
-    expect(result).not.toContain("hl=en");
+    expect(result).toContain("hl=en");
+    expect(result).not.toContain("hl=de");
   });
 
   it("returns short URL unchanged", () => {
@@ -36,6 +36,23 @@ describe("appendHlParam", () => {
     const url = "https://www.google.com/maps/place/Test/@0,0,15z?foo=bar";
     const result = appendHlParam(url);
     expect(result).toContain("foo=bar");
+    expect(result).toContain("hl=en");
+  });
+
+  it("strips g_ep param that triggers limited view", () => {
+    const url =
+      "https://www.google.com/maps/place/Test/@0,0,15z?g_ep=EgoyMDI2MDQwNi4wIKXMDSoASAFQAw%3D%3D&hl=en";
+    const result = appendHlParam(url);
+    expect(result).not.toContain("g_ep");
+    expect(result).toContain("hl=en");
+  });
+
+  it("strips entry param alongside g_ep", () => {
+    const url =
+      "https://www.google.com/maps/place/Test/@0,0,15z?entry=ttu&g_ep=EgoyMDI2MDQwNi4wIKXMDSoASAFQAw%3D%3D&hl=en";
+    const result = appendHlParam(url);
+    expect(result).not.toContain("entry");
+    expect(result).not.toContain("g_ep");
     expect(result).toContain("hl=en");
   });
 });

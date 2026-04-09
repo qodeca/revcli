@@ -17,7 +17,7 @@ export interface BatchOptions {
   maxReviews?: number;
   sort: SortOrder;
   format: OutputFormat;
-  headed: boolean;
+  headless: boolean;
   delay: number;
   resume: boolean;
   locationDelay: number;
@@ -82,7 +82,7 @@ export async function batchCommand(
           scrapeLocation(parsed, {
             sort: options.sort,
             maxReviews: options.maxReviews,
-            headed: options.headed,
+            headless: options.headless,
             delay: options.delay,
           }),
         url,

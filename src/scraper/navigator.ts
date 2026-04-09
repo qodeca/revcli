@@ -6,6 +6,7 @@ import { logger } from "../utils/logger.js";
 import { SELECTORS } from "./selectors.js";
 import { handleConsent, ensureEnglishLocale, appendHlParam } from "./consent.js";
 import { extractBusinessInfo } from "./business-extractor.js";
+import { hasLimitedView } from "./auth.js";
 
 const SORT_OPTIONS: Record<SortOrder, number> = {
   relevant: 0,
@@ -61,6 +62,12 @@ export async function navigateToReviews(
 async function openReviewsTab(page: Page): Promise<void> {
   await page.waitForSelector(SELECTORS.tab, { timeout: 10000 });
   await page.waitForTimeout(1000);
+
+  // Check for limited view before attempting to find Reviews tab
+  if (await hasLimitedView(page)) {
+    logger.warn("Limited view detected – Reviews tab is hidden");
+    return;
+  }
 
   // Content-based tab detection – find the tab containing "Review" text
   const tabs = page.locator(SELECTORS.tab);
