@@ -75,6 +75,8 @@ URL input → `parseGoogleMapsInput()` validates → `scrapeLocation(parsed)` la
 - **Rating=0 sentinel**: When stars selector is stale, reviews get `rating: 0` instead of being silently discarded. Parser and extractor both warn about this.
 - **Batch safety**: Filename deduplication prevents overwrites. Per-location timeout (`--location-timeout`, default 5 min) prevents indefinite hangs. Invalid URLs logged with warnings.
 - **Sort order verification**: After selecting a sort order via the dropdown, `setSortOrder()` verifies the ARIA live region (`div[aria-live="polite"][aria-atomic="true"]`) contains the expected keyword (e.g., "newest"). Google Maps announces sort changes via this accessibility element. If verification fails, the scraper exits with an unrecoverable error. The `hl=en` locale enforcement guarantees English announcement text.
+- **Supported URL formats**: Long URLs (`/maps/place/...`), short URLs (`maps.app.goo.gl/...`), CID URLs (`maps?cid=...`), ftid URLs (`maps?ftid=0x...:0x...`), and Place ID strings (`ChIJ...`). The ftid and CID regexes accept an optional trailing slash (`/maps/?`). Hex digits in ftid/placeId are case-insensitive.
+- **Percent-encoding resilience**: `extractPlaceIdFromUrl()` applies `decodeURIComponent()` before regex matching because `appendHlParam()` routes through `URLSearchParams` which encodes `:` to `%3A` in query values. Without decoding, the `FTID_IN_URL` regex fails to match the encoded colon.
 - **Shell quoting**: Google Maps URLs contain `!` characters that zsh/bash interpret as history expansion. Always use single quotes (`'...'`) around URLs in CLI examples and commands.
 
 ## Conventions
@@ -85,5 +87,6 @@ URL input → `parseGoogleMapsInput()` validates → `scrapeLocation(parsed)` la
 - Tests use vitest (140 tests across 12 files) – pure-function tests for parser, schema, URL, CSV, JSON, retry, rate-limiter, consent, unrecoverable, batch-utils, validate, scroller; Playwright-dependent modules are not unit tested
 - `parseInputFile()`, `slugify()`, and `deduplicateFilename()` in batch.ts are exported for testability
 - `appendHlParam()` in consent.ts and `isUnrecoverable()` in retry.ts are exported for testability
+- `extractPlaceIdFromUrl()` in url.ts is exported for testability (direct tests cover priority, encoding, edge cases)
 - `calculateStaleDelay()` and `shouldContinueScrolling()` in scroller.ts are exported for testability
 - `detectLanguage()` in parser.ts is a simple Arabic/Latin heuristic, not full language detection

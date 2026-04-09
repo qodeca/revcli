@@ -262,7 +262,7 @@ npx playwright install chromium
 
 ```bash
 npm run dev -- scrape 'https://maps.app.goo.gl/...' -m 5    # Run from source
-npm test                                                      # Run all tests (121)
+npm test                                                      # Run all tests (140)
 npx vitest run tests/parser.test.ts                           # Run single test file
 npm run typecheck                                             # Type check
 npm run build                                                 # Build to dist/
