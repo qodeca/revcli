@@ -47,6 +47,8 @@ Look for the repeating container element that wraps each review. Previously `div
 | **Sort option** | Menu item in sort dropdown | `div[role="menuitemradio"]` |
 | **Address** | Business address element | `button[data-item-id="address"] div.fontBodyMedium` |
 | **Scroll container** | Scrollable parent of review cards (4 fallbacks tried in order) | `div.m6QErb.DxyBCb.kA9KIf.dS8AEf` |
+| **Loading indicator** | Material Design spinner at bottom of scroll container during lazy-load (CSS animation state toggles paused/running) | `div.lXJj5c` |
+| **Sort live region** | ARIA live region announcing sort changes (e.g., "sorted from newest to oldest") | `div[aria-live="polite"][aria-atomic="true"]` |
 
 ### 4. Business info selectors (in business-extractor.ts, not in SELECTORS)
 
