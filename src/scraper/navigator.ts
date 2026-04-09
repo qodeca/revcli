@@ -136,23 +136,28 @@ export async function setSortOrder(page: Page, sortOrder: SortOrder): Promise<vo
 
   const expectedKeyword = SORT_VERIFY_TEXT[sortOrder];
 
+  // Google Maps announces sort changes via an ARIA live region
+  // e.g., "The reviews are now sorted from newest to oldest."
   try {
     await page.waitForFunction(
       ({ sel, keyword }) => {
-        const btn = document.querySelector(sel);
-        if (!btn) return false;
-        return (btn.textContent ?? "").trim().toLowerCase().includes(keyword);
+        const liveRegion = document.querySelector(sel);
+        if (!liveRegion) return false;
+        return (liveRegion.textContent ?? "").trim().toLowerCase().includes(keyword);
       },
-      { sel: SELECTORS.sortButtonCSS, keyword: expectedKeyword },
+      { sel: SELECTORS.sortLiveRegion, keyword: expectedKeyword },
       { timeout: 5000 },
     );
   } catch {
-    const actual = await sortButton.first().textContent();
     // Matched by isUnrecoverable() in retry.ts
     throw new Error(
-      `Sort verification failed: expected "${sortOrder}" but sort button shows "${(actual ?? "").trim()}"`,
+      `Sort verification failed: expected "${sortOrder}" but no ARIA announcement found containing "${expectedKeyword}"`,
     );
   }
+
+  // Wait for reviews to reload after sort change
+  await page.waitForSelector(SELECTORS.reviewCard, { timeout: 10000 });
+  await page.waitForTimeout(1000);
 
   logger.debug(`Sort order verified: ${sortOrder}`);
 }
