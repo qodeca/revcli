@@ -1,22 +1,17 @@
 import type { Page } from "playwright";
-import type { Review, SortOrder } from "../core/schema.js";
+import type { Review } from "../core/schema.js";
 import { expandAllReviews, extractReviews } from "./extractor.js";
 import { parseReview } from "./parser.js";
 import { logger } from "../utils/logger.js";
 import { SELECTORS } from "./selectors.js";
-import { setSortOrder } from "./navigator.js";
-
 export interface ScrollOptions {
   maxReviews?: number;
   delayMs: number;
-  extraSortOrders?: SortOrder[];
 }
 
 /**
  * Scroll the reviews panel and collect reviews incrementally.
  * Uses deduplication to avoid collecting the same review twice.
- * When a sort order is exhausted and maxReviews isn't reached,
- * switches to additional sort orders to collect more reviews.
  */
 export async function scrollAndCollectReviews(
   page: Page,
@@ -25,7 +20,6 @@ export async function scrollAndCollectReviews(
   const collectedIds = new Set<string>();
   const reviews: Review[] = [];
 
-  // Find the scrollable reviews container
   const scrollContainer = await findScrollContainer(page);
   if (!scrollContainer) {
     logger.warn("Could not find reviews scroll container");
@@ -33,45 +27,12 @@ export async function scrollAndCollectReviews(
   }
 
   logger.info("Scrolling to collect reviews...");
-
-  // Collect from the current (primary) sort order
-  const done = await collectFromCurrentSort(
-    page,
-    scrollContainer,
-    collectedIds,
-    reviews,
-    options,
-  );
-
-  if (done || !options.extraSortOrders?.length) {
-    return reviews;
-  }
-
-  // Try additional sort orders to collect more reviews
-  for (const sortOrder of options.extraSortOrders) {
-    logger.info(
-      `Switching to "${sortOrder}" sort to collect more reviews...`,
-    );
-    await setSortOrder(page, sortOrder);
-    await page.waitForTimeout(3000);
-
-    const reachedMax = await collectFromCurrentSort(
-      page,
-      scrollContainer,
-      collectedIds,
-      reviews,
-      options,
-    );
-
-    if (reachedMax) break;
-  }
-
+  await collectFromCurrentSort(page, scrollContainer, collectedIds, reviews, options);
   return reviews;
 }
 
 /**
  * Scroll and collect reviews from the currently active sort order.
- * Returns true if maxReviews was reached.
  */
 async function collectFromCurrentSort(
   page: Page,
@@ -79,7 +40,7 @@ async function collectFromCurrentSort(
   collectedIds: Set<string>,
   reviews: Review[],
   options: ScrollOptions,
-): Promise<boolean> {
+): Promise<void> {
   let staleScrollCount = 0;
   const maxStaleScrolls = 5;
 
@@ -100,7 +61,7 @@ async function collectFromCurrentSort(
 
       if (options.maxReviews && reviews.length >= options.maxReviews) {
         logger.info(`Reached max reviews limit (${options.maxReviews})`);
-        return true;
+        return;
       }
     }
 
@@ -111,9 +72,9 @@ async function collectFromCurrentSort(
       staleScrollCount++;
       if (staleScrollCount >= maxStaleScrolls) {
         logger.info(
-          `No new reviews after scrolling – exhausted this sort order (${reviews.length} total)`,
+          `No new reviews after scrolling – no more reviews available (${reviews.length} total)`,
         );
-        return false;
+        return;
       }
     }
 

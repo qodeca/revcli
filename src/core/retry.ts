@@ -61,6 +61,7 @@ export function isUnrecoverable(error: Error): boolean {
     message.includes("access denied") ||
     message.includes("executable doesn't exist") ||
     message.includes("browser has been closed") ||
-    message.includes("browsertype.launch")
+    message.includes("browsertype.launch") ||
+    message.includes("sort verification failed")
   );
 }

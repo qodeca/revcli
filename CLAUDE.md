@@ -74,7 +74,7 @@ URL input → `parseGoogleMapsInput()` validates → `scrapeLocation(parsed)` la
 - **Type-safe options**: `SortOrder` and `OutputFormat` union types in `schema.ts` provide compile-time safety. Constants `SORT_ORDERS` and `OUTPUT_FORMATS` are the single source of truth.
 - **Rating=0 sentinel**: When stars selector is stale, reviews get `rating: 0` instead of being silently discarded. Parser and extractor both warn about this.
 - **Batch safety**: Filename deduplication prevents overwrites. Per-location timeout (`--location-timeout`, default 5 min) prevents indefinite hangs. Invalid URLs logged with warnings.
-- **Multi-sort collection**: When a sort order is exhausted but `maxReviews` isn't reached, the scroller automatically switches to additional sort orders (highest, lowest) to collect more reviews. Deduplication by `reviewId` prevents duplicates across sorts.
+- **Sort order verification**: After selecting a sort order via the dropdown, `setSortOrder()` verifies the sort button text matches the expected keyword. If verification fails, the scraper exits with an unrecoverable error. The `hl=en` locale enforcement guarantees English button text.
 - **Shell quoting**: Google Maps URLs contain `!` characters that zsh/bash interpret as history expansion. Always use single quotes (`'...'`) around URLs in CLI examples and commands.
 
 ## Conventions
@@ -82,7 +82,7 @@ URL input → `parseGoogleMapsInput()` validates → `scrapeLocation(parsed)` la
 - ESM-only (`"type": "module"`, `.js` extensions in imports)
 - Node 22+ required
 - Strict TypeScript, zero `any` types
-- Tests use vitest (108 tests across 11 files) – pure-function tests for parser, schema, URL, CSV, JSON, retry, rate-limiter, consent, unrecoverable, batch-utils, validate; Playwright-dependent modules are not unit tested
+- Tests use vitest (109 tests across 11 files) – pure-function tests for parser, schema, URL, CSV, JSON, retry, rate-limiter, consent, unrecoverable, batch-utils, validate; Playwright-dependent modules are not unit tested
 - `parseInputFile()`, `slugify()`, and `deduplicateFilename()` in batch.ts are exported for testability
 - `appendHlParam()` in consent.ts and `isUnrecoverable()` in retry.ts are exported for testability
 - `detectLanguage()` in parser.ts is a simple Arabic/Latin heuristic, not full language detection

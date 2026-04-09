@@ -30,6 +30,10 @@ describe("isUnrecoverable", () => {
     expect(isUnrecoverable(new Error("browserType.launch: failed to launch"))).toBe(true);
   });
 
+  it("detects 'sort verification failed'", () => {
+    expect(isUnrecoverable(new Error('Sort verification failed: expected "newest" but sort button shows "Most relevant"'))).toBe(true);
+  });
+
   it("returns false for timeout errors", () => {
     expect(isUnrecoverable(new Error("Navigation timeout of 30000ms exceeded"))).toBe(false);
   });

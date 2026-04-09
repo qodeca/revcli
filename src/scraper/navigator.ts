@@ -103,6 +103,13 @@ async function openReviewsTab(page: Page): Promise<void> {
   logger.debug("Reviews panel loaded");
 }
 
+const SORT_VERIFY_TEXT: Record<SortOrder, string> = {
+  newest: "newest",
+  highest: "highest",
+  lowest: "lowest",
+  relevant: "relevant",
+};
+
 export async function setSortOrder(page: Page, sortOrder: SortOrder): Promise<void> {
   const sortIndex = SORT_OPTIONS[sortOrder];
   if (sortIndex === undefined) {
@@ -110,20 +117,42 @@ export async function setSortOrder(page: Page, sortOrder: SortOrder): Promise<vo
     return;
   }
 
-  try {
-    const sortButton = page.locator(SELECTORS.sortButton);
-    await sortButton.first().click({ timeout: 5000 });
+  const sortButton = page.locator(SELECTORS.sortButton);
+  await sortButton.first().click({ timeout: 5000 });
 
-    await page.waitForSelector(SELECTORS.sortMenuItem, { timeout: 3000 });
+  await page.waitForSelector(SELECTORS.sortMenuItem, { timeout: 3000 });
 
-    const menuItems = page.locator(SELECTORS.sortMenuItem);
-    const count = await menuItems.count();
-    if (sortIndex < count) {
-      await menuItems.nth(sortIndex).click();
-      logger.debug(`Sort order set to: ${sortOrder}`);
-      await page.waitForTimeout(3000);
-    }
-  } catch {
-    logger.warn(`Could not set sort order to "${sortOrder}"`);
+  const menuItems = page.locator(SELECTORS.sortMenuItem);
+  const count = await menuItems.count();
+  if (sortIndex >= count) {
+    throw new Error(
+      `Sort verification failed: sort menu has ${count} items but "${sortOrder}" requires index ${sortIndex}`,
+    );
   }
+  await menuItems.nth(sortIndex).click();
+
+  // Wait for the sort menu to close
+  await page.waitForSelector(SELECTORS.sortMenuItem, { state: "hidden", timeout: 3000 }).catch(() => {});
+
+  const expectedKeyword = SORT_VERIFY_TEXT[sortOrder];
+
+  try {
+    await page.waitForFunction(
+      ({ sel, keyword }) => {
+        const btn = document.querySelector(sel);
+        if (!btn) return false;
+        return (btn.textContent ?? "").trim().toLowerCase().includes(keyword);
+      },
+      { sel: SELECTORS.sortButtonCSS, keyword: expectedKeyword },
+      { timeout: 5000 },
+    );
+  } catch {
+    const actual = await sortButton.first().textContent();
+    // Matched by isUnrecoverable() in retry.ts
+    throw new Error(
+      `Sort verification failed: expected "${sortOrder}" but sort button shows "${(actual ?? "").trim()}"`,
+    );
+  }
+
+  logger.debug(`Sort order verified: ${sortOrder}`);
 }
