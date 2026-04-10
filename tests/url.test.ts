@@ -3,6 +3,8 @@ import {
   parseGoogleMapsInput,
   isGoogleMapsUrl,
   extractPlaceIdFromUrl,
+  placeIdsMatch,
+  canVerifyPlaceIdFormat,
 } from "../src/utils/url.js";
 
 describe("parseGoogleMapsInput", () => {
@@ -230,5 +232,105 @@ describe("extractPlaceIdFromUrl", () => {
         "https://www.google.com/maps?ftid=0x3E2EE364:0x8E3A8BCF",
       ),
     ).toBe("0x3E2EE364:0x8E3A8BCF");
+  });
+});
+
+describe("placeIdsMatch", () => {
+  it("returns true when expected is null (no upfront expectation)", () => {
+    expect(placeIdsMatch(null, "0xabc:0xdef")).toBe(true);
+    expect(placeIdsMatch(null, null)).toBe(true);
+  });
+
+  it("returns true for exact matches", () => {
+    expect(
+      placeIdsMatch(
+        "0x3e2ee3641f7016d7:0x8e3a8bcf52dad296",
+        "0x3e2ee3641f7016d7:0x8e3a8bcf52dad296",
+      ),
+    ).toBe(true);
+  });
+
+  it("is case-insensitive", () => {
+    expect(
+      placeIdsMatch(
+        "0x3E2EE3641F7016D7:0x8E3A8BCF52DAD296",
+        "0x3e2ee3641f7016d7:0x8e3a8bcf52dad296",
+      ),
+    ).toBe(true);
+  });
+
+  it("returns false when expected is known but actual is null", () => {
+    expect(placeIdsMatch("0xabc:0xdef", null)).toBe(false);
+  });
+
+  it("returns false when placeIds differ", () => {
+    expect(
+      placeIdsMatch(
+        "0x3e2ee5004f7f2f8d:0xc8ef09460ea7172",
+        "0x3e2f002e51674071:0x4534d81cb555dd27",
+      ),
+    ).toBe(false);
+  });
+
+  it("returns false when only one half differs", () => {
+    expect(
+      placeIdsMatch(
+        "0x3e2ee3641f7016d7:0x8e3a8bcf52dad296",
+        "0x3e2ee3641f7016d7:0x0000000000000000",
+      ),
+    ).toBe(false);
+  });
+
+  it("treats Place ID strings as literal comparisons", () => {
+    expect(
+      placeIdsMatch(
+        "ChIJN1t_tDeuEmsRUsoyG83frY4",
+        "ChIJN1t_tDeuEmsRUsoyG83frY4",
+      ),
+    ).toBe(true);
+    expect(
+      placeIdsMatch("ChIJN1t_tDeuEmsRUsoyG83frY4", "ChIJDifferent000000000"),
+    ).toBe(false);
+  });
+
+  it("treats empty string expected as 'no expectation' (!expected short-circuit)", () => {
+    // Pin current semantics so a refactor to `expected == null` doesn't
+    // silently flip behavior for the empty-string edge case.
+    expect(placeIdsMatch("", "0x3e2ee3641f7016d7:0x8e3a8bcf52dad296")).toBe(true);
+    expect(placeIdsMatch("", null)).toBe(true);
+  });
+});
+
+describe("canVerifyPlaceIdFormat", () => {
+  it("returns true for 0x:0x format from extractPlaceIdFromUrl output", () => {
+    expect(
+      canVerifyPlaceIdFormat("0x3e2ee3641f7016d7:0x8e3a8bcf52dad296"),
+    ).toBe(true);
+  });
+
+  it("returns true for uppercase 0x hex", () => {
+    expect(
+      canVerifyPlaceIdFormat("0x3E2EE3641F7016D7:0x8E3A8BCF52DAD296"),
+    ).toBe(true);
+  });
+
+  it("returns false for ChIJ Place ID strings", () => {
+    // Regression test for issue #4 fix: ChIJ inputs must NOT be verified
+    // against extractPlaceIdFromUrl output because the formats are different
+    // and would always mismatch.
+    expect(canVerifyPlaceIdFormat("ChIJN1t_tDeuEmsRUsoyG83frY4")).toBe(false);
+  });
+
+  it("returns false for null", () => {
+    expect(canVerifyPlaceIdFormat(null)).toBe(false);
+  });
+
+  it("returns false for empty string", () => {
+    expect(canVerifyPlaceIdFormat("")).toBe(false);
+  });
+
+  it("returns false for other non-0x strings", () => {
+    expect(canVerifyPlaceIdFormat("place_id:ChIJ...")).toBe(false);
+    expect(canVerifyPlaceIdFormat("GhIJ123")).toBe(false);
   });
 });
