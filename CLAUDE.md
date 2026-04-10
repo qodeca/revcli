@@ -28,13 +28,13 @@ CLI (src/index.ts)  ─── commander routes to 4 commands:
 ├── src/commands/validate.ts  ── Zod schema validation of JSON files
 └── src/commands/auth.ts      ── login (headed), status (headless), logout (delete profile)
 
-src/scraper/scrape-location.ts  ── shared orchestrator, accepts ParsedUrl (used by both commands)
+src/scraper/scrape-location.ts  ── shared orchestrator, accepts ParsedUrl (used by both commands); delegates final payload construction to exported pure helper `assembleScrapeResult()` which reconciles `business.totalReviews` with `reviews.length`
 │
 ├── browser.ts              ── persistent Chromium context (~/.revcli/chrome-profile/), anti-detection, SIGINT cleanup
 ├── auth.ts                 ── isSignedIn(), hasLimitedView(), waitForUserAuth() – Google auth detection
 ├── navigator.ts            ── orchestrates state eviction → consent → locale → limited-view check → tab → sort; verifies loaded placeId against parsed.placeId
 ├── consent.ts              ── Google consent handling, hl=en enforcement, g_ep/entry stripping
-├── business-extractor.ts   ── business name/rating/totalReviews/address extraction
+├── business-extractor.ts   ── business name/rating/totalReviews/address extraction; page.evaluate() returns raw DOM strings only, parsing happens Node-side via parseReviewCount + parseRatingText; PII-scrubbed debug logging of candidate strings
 ├── scroller.ts             ── mouse wheel scrolling, deduplication by review ID, exponential backoff stale-scroll detection, loading spinner awareness
 ├── extractor.ts            ── single page.evaluate() for bulk DOM extraction, staleness warnings
 ├── parser.ts               ── RawReview → validated Review via Zod, language detection
@@ -83,16 +83,22 @@ URL input → `parseGoogleMapsInput()` validates → `scrapeLocation(parsed)` la
 - **Supported URL formats**: Long URLs (`/maps/place/...`), short URLs (`maps.app.goo.gl/...`), CID URLs (`maps?cid=...`), ftid URLs (`maps?ftid=0x...:0x...`), and Place ID strings (`ChIJ...`). The ftid and CID regexes accept an optional trailing slash (`/maps/?`). Hex digits in ftid/placeId are case-insensitive.
 - **Percent-encoding resilience**: `extractPlaceIdFromUrl()` applies `decodeURIComponent()` before regex matching because `appendHlParam()` routes through `URLSearchParams` which encodes `:` to `%3A` in query values. Without decoding, the `FTID_IN_URL` regex fails to match the encoded colon.
 - **Shell quoting**: Google Maps URLs contain `!` characters that zsh/bash interpret as history expansion. Always use single quotes (`'...'`) around URLs in CLI examples and commands.
+- **totalReviews reconciliation**: `assembleScrapeResult()` in `src/scraper/scrape-location.ts` is an exported pure helper called from `scrapeLocation()` to enforce the invariant `business.totalReviews === reviews.length` at the single seam where `businessInfo` (header-derived) and `reviews` (scraped) first coexist. The original Google-header value is preserved as `business.headerTotalReviews`. See issue #5. When `--max-reviews N` caps collection, `totalReviews === N` (not the header) and `headerTotalReviews` holds Google's larger number.
+- **Header parsing extracted for testability**: `src/scraper/parser.ts` exports `parseReviewCount(text)` and `src/scraper/business-extractor.ts` exports `parseRatingText(text)`. Both are pure functions called from the Node side after `page.evaluate()` returns raw DOM strings. This matches the repo's "extract pure logic out of Playwright-coupled code" convention (see `parseInputFile`, `extractPlaceIdFromUrl`, `calculateStaleDelay`). `parseReviewCount` assumes the `hl=en` locale – comma thousand separator, period is a decimal and not a thousands separator. Suffix forms (`1.6K reviews`) return null; reconciliation backfills via `reviews.length`.
+- **Business header debug logging**: `business-extractor.ts` emits PII-scrubbed debug-level logs of raw DOM candidate strings (tab text, aria-label badge, scoped `[role="main"]` body snippet) so selector staleness can be diagnosed from `--verbose` output without leaking reviewer names or review content. The scrub preserves digits, separators, K/M/B suffixes, and the letters of "reviews"; all other characters become `·`.
 
 ## Conventions
 
 - ESM-only (`"type": "module"`, `.js` extensions in imports)
 - Node 22+ required
 - Strict TypeScript, zero `any` types
-- Tests use vitest (161 tests across 13 files) – pure-function tests for parser, schema, URL, CSV, JSON, retry, rate-limiter, consent, unrecoverable, batch-utils, validate, scroller, storage-types; Playwright-dependent modules are not unit tested
+- Tests use vitest (235 tests across 14 files) – pure-function tests for parser, schema, URL, CSV, JSON, retry, rate-limiter, consent, unrecoverable, batch-utils, validate, scroller, storage-types, scrape-location; Playwright-dependent modules are not unit tested
 - `parseInputFile()`, `slugify()`, and `deduplicateFilename()` in batch.ts are exported for testability
+- `parseReview()`, `parseReviewCount()`, and `detectLanguage()` in parser.ts are exported for testability
+- `parseRatingText()` in business-extractor.ts is exported for testability (called Node-side after `page.evaluate()` returns the raw aria-label string)
+- `assembleScrapeResult()` in scrape-location.ts is exported for testability – pure helper that enforces `business.totalReviews === reviews.length` and preserves the header value in `business.headerTotalReviews`
 - `appendHlParam()` in consent.ts and `isUnrecoverable()` in retry.ts are exported for testability
 - `extractPlaceIdFromUrl()`, `placeIdsMatch()`, and `canVerifyPlaceIdFormat()` in url.ts are exported for testability (direct tests cover priority, encoding, edge cases, null handling, case-insensitivity, and ChIJ vs 0x format discrimination)
 - `VOLATILE_STORAGE_TYPES` in `src/scraper/storage-types.ts` is a pure constant kept separate from `browser.ts` so tests can pin the cookies-excluded invariant without pulling in Playwright
 - `calculateStaleDelay()` and `shouldContinueScrolling()` in scroller.ts are exported for testability
-- `detectLanguage()` in parser.ts is a simple Arabic/Latin heuristic, not full language detection
+- `detectLanguage()` in parser.ts is a simple Arabic/Latin heuristic, not full language detection (exported alongside `parseReview()` and `parseReviewCount()`)

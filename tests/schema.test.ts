@@ -95,17 +95,110 @@ describe("OwnerResponseSchema", () => {
 });
 
 describe("BusinessSchema", () => {
+  const validBusiness = {
+    name: "Test",
+    placeId: null,
+    url: "https://example.com",
+    address: null,
+    rating: null,
+    totalReviews: null,
+    headerTotalReviews: null,
+    scrapeDate: "2025-01-01T00:00:00Z",
+  };
+
   it("accepts all-null optional fields", () => {
+    const result = BusinessSchema.safeParse(validBusiness);
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts positive integer headerTotalReviews", () => {
     const result = BusinessSchema.safeParse({
-      name: "Test",
-      placeId: null,
-      url: "https://example.com",
-      address: null,
-      rating: null,
-      totalReviews: null,
-      scrapeDate: "2025-01-01T00:00:00Z",
+      ...validBusiness,
+      headerTotalReviews: 1568,
     });
     expect(result.success).toBe(true);
+  });
+
+  it("accepts zero headerTotalReviews (boundary)", () => {
+    const result = BusinessSchema.safeParse({
+      ...validBusiness,
+      headerTotalReviews: 0,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts null headerTotalReviews", () => {
+    const result = BusinessSchema.safeParse({
+      ...validBusiness,
+      headerTotalReviews: null,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("defaults missing headerTotalReviews to null (backward compat)", () => {
+    const {
+      headerTotalReviews: _omitted,
+      ...withoutHeaderTotal
+    } = validBusiness;
+    const result = BusinessSchema.safeParse(withoutHeaderTotal);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.headerTotalReviews).toBeNull();
+    }
+  });
+
+  it("rejects non-integer headerTotalReviews", () => {
+    const result = BusinessSchema.safeParse({
+      ...validBusiness,
+      headerTotalReviews: 3.5,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects negative headerTotalReviews", () => {
+    const result = BusinessSchema.safeParse({
+      ...validBusiness,
+      headerTotalReviews: -1,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects string headerTotalReviews", () => {
+    const result = BusinessSchema.safeParse({
+      ...validBusiness,
+      headerTotalReviews: "1568",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects negative totalReviews (tightened to .min(0))", () => {
+    const result = BusinessSchema.safeParse({
+      ...validBusiness,
+      totalReviews: -1,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts totalReviews=0 (boundary)", () => {
+    const result = BusinessSchema.safeParse({
+      ...validBusiness,
+      totalReviews: 0,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("old fixture file without headerTotalReviews parses via .default(null)", async () => {
+    const { readFileSync } = await import("node:fs");
+    const raw = readFileSync(
+      new URL("../fixtures/sample-reviews.json", import.meta.url),
+      "utf8",
+    );
+    const parsed = JSON.parse(raw);
+    // The fixture does not have business.headerTotalReviews
+    expect(parsed.business.headerTotalReviews).toBeUndefined();
+    // BusinessSchema.parse should succeed and coerce the missing field to null
+    const result = BusinessSchema.parse(parsed.business);
+    expect(result.headerTotalReviews).toBeNull();
   });
 });
 

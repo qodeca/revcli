@@ -4,6 +4,57 @@ import { ReviewSchema, generateReviewId } from "../core/schema.js";
 import { logger } from "../utils/logger.js";
 
 /**
+ * Parse the review count from header-ish text such as "1,568 reviews" or "Reviews 1,568".
+ *
+ * Scoped to text that already contains the word "review" (case-insensitive).
+ * Relies on revcli's hl=en invariant – English locale, comma thousand-separator.
+ * Non-ASCII separators (NBSP, NNBSP, thin space, regular space) are tolerated
+ * as a defensive hedge against DOM layout surprises. Period separators
+ * (e.g. "1.568") are REJECTED because under hl=en a period always means a decimal,
+ * not a thousands group. K/M/B suffix forms (e.g. "1.6K reviews") are REJECTED
+ * and return null – the reconciliation at scrape assembly will fall back to
+ * reviews.length so the user-visible count is still correct.
+ *
+ * Returns null when: empty/whitespace input, no "review" keyword, no digits,
+ * suffix form detected, or the matched digits parse to NaN/negative.
+ */
+export function parseReviewCount(text: string): number | null {
+  if (!text || text.trim().length === 0) return null;
+
+  const normalized = text
+    .replace(/\u00a0/g, " ")
+    .replace(/\u202f/g, " ")
+    .replace(/\u2009/g, " ");
+
+  if (!/review/i.test(normalized)) return null;
+
+  // Reject K/M/B suffix forms – reconciliation will overwrite from reviews.length.
+  if (/\d\s*[kKmMbB](\s|\b)/.test(normalized)) return null;
+
+  // Reject any decimal number (digit.digit). Under hl=en a period always means
+  // decimal, never a thousands separator, so this is unambiguous.
+  if (/\d+\.\d/.test(normalized)) return null;
+
+  // Allow optional non-alphanumeric punctuation (e.g. ")") between the digit
+  // run and the "reviews" keyword, so "(1,234) reviews" parses cleanly.
+  const preKeyword = normalized.match(
+    /([\d][\d,\s]*\d|\d)[^\w\d]*\s*reviews?\b/i,
+  );
+  const postKeyword = preKeyword
+    ? null
+    : normalized.match(/reviews?[^\w\d]*\s+([\d][\d,\s]*\d|\d)/i);
+
+  const candidate = preKeyword?.[1] ?? postKeyword?.[1];
+  if (!candidate) return null;
+
+  const cleaned = candidate.replace(/[,\s]/g, "");
+  const parsed = parseInt(cleaned, 10);
+  if (Number.isNaN(parsed) || parsed < 0) return null;
+
+  return parsed;
+}
+
+/**
  * Detect the likely script/language of a text string.
  * Simple heuristic – only distinguishes Arabic vs Latin script.
  * Returns lowercase language hint, not ISO 639 code.
