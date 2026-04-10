@@ -10,6 +10,7 @@ const mockResult: ScrapeResult = {
     address: "123 Main St",
     rating: 4.5,
     totalReviews: 100,
+    headerTotalReviews: 120,
     scrapeDate: "2025-01-01T00:00:00Z",
   },
   reviews: [

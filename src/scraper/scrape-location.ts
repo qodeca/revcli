@@ -4,13 +4,58 @@ import { launchBrowser, closeBrowser, trackBrowser } from "./browser.js";
 import { navigateToReviews } from "./navigator.js";
 import { scrollAndCollectReviews } from "./scroller.js";
 import { hasLimitedView, waitForUserAuth } from "./auth.js";
-import type { ScrapeResult, Review, SortOrder } from "../core/schema.js";
+import type {
+  ScrapeResult,
+  Review,
+  SortOrder,
+  Business,
+} from "../core/schema.js";
 
 export interface ScrapeLocationOptions {
   sort: SortOrder;
   maxReviews?: number;
   headless: boolean;
   delay: number;
+}
+
+/**
+ * Assemble a ScrapeResult from the raw business info (header-derived) and the
+ * collected reviews list. Enforces the invariant
+ * `business.totalReviews === reviews.length` and preserves the original
+ * Google-reported header value as `business.headerTotalReviews`.
+ *
+ * Exported for direct unit testing – the reconciliation is the entire point
+ * of issue #5 and must be pinned by vitest, not relied on via manual
+ * verification.
+ *
+ * Pure function: no side effects, no Playwright, no IO. Does not mutate
+ * its inputs.
+ */
+export function assembleScrapeResult(
+  businessInfo: Omit<Business, "scrapeDate" | "headerTotalReviews">,
+  reviews: Review[],
+  ctx: {
+    scrapeDate: string;
+    scrapeDurationMs: number;
+    sortOrder: SortOrder;
+  },
+): ScrapeResult {
+  const { totalReviews: headerTotalReviews, ...rest } = businessInfo;
+  return {
+    business: {
+      ...rest,
+      totalReviews: reviews.length,
+      headerTotalReviews,
+      scrapeDate: ctx.scrapeDate,
+    },
+    reviews,
+    metadata: {
+      provider: "playwright",
+      scrapeDurationMs: ctx.scrapeDurationMs,
+      reviewsCollected: reviews.length,
+      sortOrder: ctx.sortOrder,
+    },
+  };
 }
 
 export async function scrapeLocation(
@@ -41,7 +86,7 @@ export async function scrapeLocation(
     }
 
     logger.info(
-      `Found: ${businessInfo.name} (${businessInfo.totalReviews ?? "?"} reviews)`,
+      `Found: ${businessInfo.name} (header reports ${businessInfo.totalReviews ?? "?"} reviews)`,
     );
 
     const reviews: Review[] = await scrollAndCollectReviews(page, {
@@ -49,19 +94,11 @@ export async function scrapeLocation(
       delayMs: options.delay,
     });
 
-    return {
-      business: {
-        ...businessInfo,
-        scrapeDate: new Date().toISOString(),
-      },
-      reviews,
-      metadata: {
-        provider: "playwright",
-        scrapeDurationMs: Date.now() - startTime,
-        reviewsCollected: reviews.length,
-        sortOrder: options.sort,
-      },
-    };
+    return assembleScrapeResult(businessInfo, reviews, {
+      scrapeDate: new Date().toISOString(),
+      scrapeDurationMs: Date.now() - startTime,
+      sortOrder: options.sort,
+    });
   } finally {
     await closeBrowser(context);
   }

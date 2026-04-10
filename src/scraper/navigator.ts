@@ -1,9 +1,15 @@
-import type { Page } from "playwright";
+import type { Page, Dialog } from "playwright";
 import type { ParsedUrl } from "../utils/url.js";
-import { extractPlaceIdFromUrl } from "../utils/url.js";
+import {
+  extractPlaceIdFromUrl,
+  placeIdsMatch,
+  canVerifyPlaceIdFormat,
+} from "../utils/url.js";
 import type { Business, SortOrder } from "../core/schema.js";
 import { logger } from "../utils/logger.js";
+import { UnrecoverableError } from "../core/errors.js";
 import { SELECTORS } from "./selectors.js";
+import { clearVolatileBrowserState } from "./browser.js";
 import { handleConsent, ensureEnglishLocale, appendHlParam } from "./consent.js";
 import { extractBusinessInfo } from "./business-extractor.js";
 import { hasLimitedView } from "./auth.js";
@@ -15,17 +21,30 @@ const SORT_OPTIONS: Record<SortOrder, number> = {
   lowest: 3,
 };
 
+const GOOGLE_MAPS_ORIGIN = "https://www.google.com";
+
+async function acceptDialog(dialog: Dialog): Promise<void> {
+  await dialog.accept();
+}
+
 export async function navigateToReviews(
   page: Page,
   parsed: ParsedUrl,
   sortOrder: SortOrder,
-): Promise<Omit<Business, "scrapeDate">> {
-  page.on("dialog", async (dialog) => {
-    await dialog.accept();
-  });
+): Promise<Omit<Business, "scrapeDate" | "headerTotalReviews">> {
+  // Use `off` then `on` so re-entering this function (e.g., after auth retry
+  // in scrape-location.ts) does not stack multiple listeners on the same page.
+  page.off("dialog", acceptDialog);
+  page.on("dialog", acceptDialog);
 
   // Prepare URL with hl=en to avoid double navigation
   const targetUrl = appendHlParam(parsed.url);
+
+  // Evict stale Google Maps SPA state (service workers, cache, IndexedDB,
+  // localStorage) before navigating. Without this, sequential scrapes can
+  // replay a previously-loaded location. Cookies are preserved so auth stays
+  // intact. See issue #4.
+  await clearVolatileBrowserState(page, GOOGLE_MAPS_ORIGIN);
 
   const waitUntil = parsed.isShortUrl ? "networkidle" : "domcontentloaded";
   logger.debug(`Navigating to ${targetUrl}`);
@@ -43,6 +62,32 @@ export async function navigateToReviews(
   // Extract placeId from the resolved URL (useful for short URLs)
   const resolvedUrl = page.url();
   const placeIdFromUrl = extractPlaceIdFromUrl(resolvedUrl);
+
+  // Verify the loaded page corresponds to the requested location. If Google
+  // Maps served a cached SPA shell for a previous place (despite the state
+  // eviction above), the resolved URL will point at a different placeId.
+  // Skipped for:
+  //   - Short URLs (parsed.placeId === null before redirect resolves)
+  //   - CID URLs (parsed.placeId === null; CID has no !1s/ftid embedding)
+  //   - ChIJ Place ID strings (different format space than !1s/ftid)
+  // canVerifyPlaceIdFormat narrows this to the 0x... format that
+  // extractPlaceIdFromUrl actually produces.
+  if (canVerifyPlaceIdFormat(parsed.placeId)) {
+    if (!placeIdsMatch(parsed.placeId, placeIdFromUrl)) {
+      throw new UnrecoverableError(
+        "NAV_VERIFY",
+        `Navigation verification failed: expected placeId "${parsed.placeId}" but loaded page resolves to "${placeIdFromUrl ?? "unknown"}" (resolved URL: ${resolvedUrl})`,
+      );
+    }
+    logger.debug(`Navigation verified: placeId=${parsed.placeId}`);
+  } else {
+    // No upfront placeId to verify against – log the resolved placeId so the
+    // operator can audit it post-hoc. Downstream `extractBusinessInfo` uses
+    // the resolved placeId so the output carries authoritative identity.
+    logger.debug(
+      `Skipping placeId verification (no verifiable upfront placeId). Resolved placeId: ${placeIdFromUrl ?? "unknown"}`,
+    );
+  }
 
   const businessInfo = await extractBusinessInfo(page, {
     ...parsed,

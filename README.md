@@ -73,7 +73,7 @@ Scrape reviews from a single Google Maps location.
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `-m, --max-reviews <n>` | all | Maximum number of reviews to collect. Must be a positive integer |
+| `-m, --max-reviews <n>` | all | Maximum number of reviews to collect. Must be a positive integer. When capped, `business.totalReviews` equals the capped count and `business.headerTotalReviews` preserves Google's full count |
 | `-s, --sort <order>` | `newest` | Review sort order. Choices: `newest`, `relevant`, `highest`, `lowest` |
 | `-o, --output <path>` | stdout | Write output to file instead of stdout |
 | `-f, --format <type>` | `json` | Output format. Choices: `json`, `csv` |
@@ -109,7 +109,7 @@ Scrape reviews from multiple locations listed in a file. Produces one output fil
 | Option | Default | Description |
 |--------|---------|-------------|
 | `-d, --output-dir <path>` | `./output` | Directory for output files. Created automatically if it doesn't exist |
-| `-m, --max-reviews <n>` | all | Maximum number of reviews per location. Must be a positive integer |
+| `-m, --max-reviews <n>` | all | Maximum number of reviews per location. Must be a positive integer. When capped, `business.totalReviews` equals the capped count and `business.headerTotalReviews` preserves Google's full count |
 | `-s, --sort <order>` | `newest` | Review sort order. Choices: `newest`, `relevant`, `highest`, `lowest` |
 | `-f, --format <type>` | `json` | Output format. Choices: `json`, `csv` |
 | `--headless` | `false` | Hide the browser window |
@@ -193,6 +193,7 @@ revcli auth logout         # Clear session
     "address": "Full address",
     "rating": 4.5,
     "totalReviews": 312,
+    "headerTotalReviews": 568,
     "scrapeDate": "2026-04-08T15:00:00.000Z"
   },
   "reviews": [
@@ -223,7 +224,22 @@ revcli auth logout         # Clear session
 }
 ```
 
+**Business field notes:**
+
+- `business.totalReviews` – Number of reviews collected in this file (equals `reviews.length`). Internally consistent with the `reviews` array.
+- `business.headerTotalReviews` – Google Maps header-reported review count, or `null` if the header could not be parsed. May differ from `totalReviews` when Google under-reports, when `--max-reviews` caps collection, or when the header parser cannot read the value.
+
 </details>
+
+### Output schema changes
+
+**`business.totalReviews` now reflects the collected review count, not Google's header value.**
+
+Previously, `business.totalReviews` was populated from the Google Maps business listing header at the start of the scrape (e.g., `"568 reviews"`). As of this release it equals `reviews.length` in the same file, so the metadata is internally consistent with the payload.
+
+The original Google-reported header value is preserved in a new field, `business.headerTotalReviews`. It is nullable (`null` when parsing failed). Old JSON files written by previous revcli versions still load via `revcli validate` – the missing field defaults to `null`.
+
+Note: when you pass `--max-reviews N`, `totalReviews === N` (the capped collected count), and `headerTotalReviews` holds Google's larger number.
 
 ## How it works
 
@@ -262,7 +278,7 @@ npx playwright install chromium
 
 ```bash
 npm run dev -- scrape 'https://maps.app.goo.gl/...' -m 5    # Run from source
-npm test                                                      # Run all tests (140)
+npm test                                                      # Run all tests (235)
 npx vitest run tests/parser.test.ts                           # Run single test file
 npm run typecheck                                             # Type check
 npm run build                                                 # Build to dist/
@@ -281,7 +297,7 @@ src/
 │   ├── business-extractor.ts   # Business info extraction from DOM
 │   ├── scroller.ts, extractor.ts, parser.ts  # Review collection pipeline
 │   └── selectors.ts            # All Google Maps CSS selectors (update here when they break)
-├── core/           # Schema definitions (Zod), types (SortOrder, OutputFormat), retry, rate limiter
+├── core/           # Schema definitions (Zod), types (SortOrder, OutputFormat), retry, UnrecoverableError, rate limiter
 ├── output/         # writeOutput() dispatcher, JSON and CSV writers
 └── utils/          # URL parser, logger, batch progress
 ```
