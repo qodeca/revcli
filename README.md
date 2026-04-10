@@ -1,6 +1,33 @@
 # revcli
 
+![Node](https://img.shields.io/badge/node-%3E%3D22-brightgreen) ![TypeScript](https://img.shields.io/badge/TypeScript-5.8-blue) ![Playwright](https://img.shields.io/badge/Playwright-1.52-green) ![License](https://img.shields.io/badge/license-MIT-blue)
+
 A command-line tool that scrapes Google Maps location reviews using browser automation. No API key required.
+
+## Why revcli?
+
+- **No Google API key, no API quotas** – reads the same public pages a regular browser sees via Playwright automation
+- **EEA auth wall handled** – persistent Chrome profile + one-shot `revcli auth` command sign you in once, then reuse the session across runs
+- **Rich review data** – bilingual text (translated + original), owner responses, photo counts, author URLs
+- **Schema-validated output** – every review round-trips through a Zod schema before landing in JSON/CSV, so data quality is enforced at the boundary
+- **Resumable batches** – interrupted large runs pick up where they left off via an atomic state file
+
+## Table of contents
+
+- [Features](#features)
+- [Prerequisites](#prerequisites)
+- [Installation](#installation)
+- [Quick start](#quick-start)
+- [CLI reference](#cli-reference)
+- [Output schema](#output-schema)
+- [How it works](#how-it-works)
+- [Troubleshooting](#troubleshooting)
+- [Limitations](#limitations)
+- [Maintenance](#maintenance)
+- [Contributing](#contributing)
+- [Reporting a bug](#reporting-a-bug)
+- [Legal notice](#legal-notice)
+- [License](#license)
 
 ## Features
 
@@ -21,18 +48,20 @@ A command-line tool that scrapes Google Maps location reviews using browser auto
 
 ## Installation
 
+> **Not yet published on npm.** Install from source:
+
 ```bash
-npm install -g revcli
+git clone https://github.com/qodeca/revcli.git
+cd revcli
+npm install
+npm run build
 npx playwright install chromium
+npm link              # optional: exposes `revcli` as a global command
 ```
 
-Or run without installing:
+After `npm link`, the `revcli` binary is available system-wide. Without linking, use `npm run dev -- scrape '<url>'` from the project directory.
 
-```bash
-npx revcli scrape 'https://maps.app.goo.gl/...' --max-reviews 50
-```
-
-> **Note:** The first run requires `npx playwright install chromium` to download the browser binary (~165 MB).
+> **Note:** The first install requires `npx playwright install chromium` to download the browser binary (~165 MB).
 
 ## Quick start
 
@@ -256,19 +285,37 @@ revcli uses [Playwright](https://playwright.dev/) to automate a Chromium browser
 
 No Google API key is needed – the tool reads the same public page a regular browser would see. The browser shows by default (use `--headless` to hide it).
 
+## Troubleshooting
+
+| Symptom | Diagnosis | Fix |
+|---|---|---|
+| "Limited view" appears instead of the Reviews tab | Google's EEA auth wall for unauthenticated users | Run `revcli auth` once to sign in; the persistent profile remembers you |
+| URL in command gets mangled, `!` characters rewritten | zsh/bash history expansion on `!` | Always wrap URLs in **single quotes** (`'...'`), never double quotes |
+| Scraper returns 0 reviews with no errors | Selectors may be stale – Google rotates obfuscated classes | Run with `--verbose` and see [docs/selector-maintenance.md](docs/selector-maintenance.md) to update selectors |
+| Warning: "N reviews have rating=0 – stars selector may be stale" | The stars selector went stale; reviews still collected, just without star ratings | Update `SELECTORS.stars` in `src/scraper/selectors.ts` |
+| Scraper hangs or times out mid-scroll | Rate limiting or anti-bot throttling | Increase `--delay` (default 3000 ms); for batches, increase `--location-delay` (default 10000 ms) |
+| `business.headerTotalReviews` is `null` in the output | Header parser couldn't read the count; `business.totalReviews` still equals `reviews.length` | Cosmetic – the scrape itself succeeded |
+| Scrape plateaus before reaching the place's full review count | Google Maps filters the `newest` sort by recency/verification; the header number is not ground truth | Expected. Use `--sort relevant` if you need more coverage |
+| "captcha detected" / "UnrecoverableError" | Google challenged the browser; running scrapes from that IP may be throttled | Wait 15–30 minutes; increase delays; consider a different network |
+
+Run any command with `-v, --verbose` for debug-level logs including selector parse decisions, scroll state, and navigation verification.
+
 ## Limitations
 
-- **Selector fragility** – Google Maps uses obfuscated CSS class names that change periodically. When this happens, the scraper returns zero reviews. All selectors are centralized in `src/scraper/selectors.ts` for easy updating. See [docs/selector-maintenance.md](docs/selector-maintenance.md).
-- **Rate limiting** – Google may throttle or block requests from automated browsers. Use `--delay` and `--location-delay` to control request pacing.
+- **Selector fragility** – Google Maps uses obfuscated CSS class names that change periodically. When this happens, the scraper returns zero reviews. All selectors are centralized in `src/scraper/selectors.ts` for easy updating.
 - **Relative timestamps** – Google Maps shows review times as "2 weeks ago" rather than exact dates. These are captured as-is.
 - **No translation toggle** – The tool captures whatever text Google displays (usually auto-translated). The original language text requires clicking "See original" which is not currently automated.
 - **Language detection** – The `originalLanguage` field uses a simple Arabic/Latin script heuristic, not full language identification.
-- **Shell quoting** – Google Maps URLs contain `!` characters that zsh/bash interpret as history expansion. Always wrap URLs in single quotes (`'...'`), not double quotes.
+- **`newest` sort filtering** – Google Maps applies hidden recency/verification filters when sorting by newest. The collected review count can plateau below the header-reported total (this is Google-side behaviour, not a scraper bug).
+
+## Maintenance
+
+Google rotates the obfuscated CSS class names every few weeks to months. When that happens, the scraper silently returns zero reviews. All selectors live in **`src/scraper/selectors.ts`** – update them in one place. The full update procedure, diagnosis steps, and list of stable vs fragile patterns is in [**docs/selector-maintenance.md**](docs/selector-maintenance.md). Read the "Expand button lesson" section there before touching `SELECTORS.expandButton` – it documents a three-revision debugging story that's easy to accidentally undo.
 
 ## Contributing
 
 ```bash
-git clone https://github.com/user/revcli.git
+git clone https://github.com/qodeca/revcli.git
 cd revcli
 npm install
 npx playwright install chromium
@@ -278,11 +325,13 @@ npx playwright install chromium
 
 ```bash
 npm run dev -- scrape 'https://maps.app.goo.gl/...' -m 5    # Run from source
-npm test                                                      # Run all tests (235)
+npm test                                                      # Run all tests (238)
 npx vitest run tests/parser.test.ts                           # Run single test file
 npm run typecheck                                             # Type check
 npm run build                                                 # Build to dist/
 ```
+
+Architecture, data-flow patterns, and coding conventions are documented in [CLAUDE.md](CLAUDE.md). Read it before making structural changes – it captures hard-won lessons (Playwright locator scoping, typed unrecoverable errors, `hl=en` invariant, etc.) that aren't obvious from the source.
 
 ### Project structure
 
@@ -303,6 +352,21 @@ src/
 ```
 
 See [CLAUDE.md](CLAUDE.md) for architecture details and coding conventions.
+
+## Reporting a bug
+
+Before opening an issue, please include the following so maintainers can reproduce:
+
+1. **`revcli --version`** output
+2. **Command you ran**, with the URL **in single quotes**
+3. **`--verbose` log** from the failing run (trim or redact reviewer names / review text if you're worried about PII – the tool's built-in PII scrubbing only covers header-parser debug logs, not full extraction)
+4. **OS and Node version** (`uname -a`, `node --version`)
+5. **A Google Maps place URL that reproduces the issue**, if possible – selectors sometimes behave differently on different place types (restaurants, hotels, gyms, etc.)
+
+Known classes of issues and where to look:
+- **Zero reviews returned** or `rating=0` warnings → Google rotated a selector. See [docs/selector-maintenance.md](docs/selector-maintenance.md).
+- **`UnrecoverableError` with `NAV_VERIFY`** → cross-contamination guard tripped; the scraper intentionally bails rather than return stale data. Open an issue with the verbose log.
+- **`captcha detected`** → you're being throttled. Not a bug, but an issue helps track frequency.
 
 ## Legal notice
 

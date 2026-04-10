@@ -38,7 +38,7 @@ Look for the repeating container element that wraps each review. Previously `div
 | **Stars** | `span[role="img"]` with `aria-label="N stars"` | `span.kvMYJc[role="img"]` |
 | **Review time** | Span showing "2 weeks ago" (inside review metadata, NOT inside owner response) | `span.rsqaWe` inside `div.DU9Pgb` |
 | **Review text** | Text span inside a content div | `span.wiI7pd` inside `div.MyEned` |
-| **Expand button** | Button with "More" text | `button.w8nwRe, button:has-text("More")` |
+| **Expand button** | Review-text / owner-response "Read more" button (see "Expand button lesson" below before editing) | `button.w8nwRe, button[jsaction*="review.expand"]` |
 | **Owner response** | Container below review text | `div.CDe7pd` |
 | **Response text** | `div.wiI7pd` (note: div, not span – different from review text) | `div.wiI7pd` inside `div.CDe7pd` |
 | **Response time** | Span with relative time inside response | `span.DZSIDd` |
@@ -82,7 +82,26 @@ The business header (name, rating, review count, address) is read by `src/scrape
 
 Run with `--verbose` and grep the log for the four `raw ...` lines and the `parsed totalReviews=...` line. The raw lines are PII-scrubbed: digits, separators, K/M/B suffixes, and the letters of "reviews" are preserved; everything else is replaced with `·`. That keeps reviewer names and review text out of shareable debug output while leaving enough signal to see what the parser saw.
 
-### 5. Tips
+### 5. Expand button lesson – do not use `:has-text("More")`
+
+The `expandButton` selector has gone through three revisions. Future maintainers editing this selector **must** read this section before reverting to a text-based fallback.
+
+**History:**
+1. **Original**: `'button.w8nwRe, button:has-text("More")'` used via `` page.locator(`${reviewCard} ${expandButton}`) `` – the template literal produced a flat CSS selector list where the comma made `button:has-text("More")` unscoped (CSS parses `A B, C` as `(A B), (C)`, not `(A B), (A C)`), so the second alternative matched buttons page-wide.
+2. **First fix** rewrote the call site to chain per-card locators (`cards.nth(i).locator(expandButton).first()`) which fixed the scope leak but introduced a per-card 500 ms click timeout bomb: every card without a match burned the full auto-wait before failing, producing 10–20 s delays per scroll iteration.
+3. **Second fix** collapsed into a single chained locator `page.locator(reviewCard).locator(expandButton)` – Playwright's chained API distributes scope across comma alternatives, so one locator query + fast `count()` iteration.
+4. **Third fix** (this section's motivation) dropped the text fallback entirely. `:has-text("X")` is a **case-insensitive substring match over descendant text content**. Reviewer names containing the letters "more" – `KHALID ALMORET`, Elmore, Moore, Latimore, Seymore, Dunmore, etc. – made author buttons match the fallback. Clicks on those author buttons opened a flood of new Local Guide profile tabs and disrupted the scroll state enough to plateau the scraper at ~790 reviews on places with a matching reviewer. Live DOM audit on a 820-card page found 150 `has-text("More")` matches in cards: 149 legitimate expand buttons, **1 rogue author button**.
+
+**Current selector**: `button.w8nwRe, button[jsaction*="review.expand"]`
+
+- Primary `button.w8nwRe` matches the stable class used by both review-text and owner-response expand buttons.
+- Fallback `button[jsaction*="review.expand"]` keys on Google Maps' semantic action routes (`review.expandReview` and `review.expandOwnerResponse`). Author buttons use `review.reviewerLink`, so there is no substring overlap.
+
+**General principle**: prefer semantic attributes (`jsaction`, `aria-label`, `data-*`, ARIA roles) over text content or obfuscated class names when writing selector fallbacks. Text is user data – reviewer names, review content, owner responses – and any substring match can collide with it.
+
+**Call-site reference**: `expandAllReviews()` in `src/scraper/extractor.ts`. The string-level regression guard is `tests/extractor-selectors.test.ts`.
+
+### 6. Tips
 
 - **`data-review-id`** and **`role="img"`** with **`aria-label="N stars"`** are semantic attributes that tend to survive class name changes
 - **`data-href`** on author buttons is more stable than class names
@@ -109,6 +128,7 @@ Run with `--verbose` and grep the log for the four `raw ...` lines and the `pars
 - `button[data-href*="/contrib/"]` – data attribute pattern
 - `div[role="menuitemradio"]` – ARIA role for sort options
 - `button[data-item-id="address"]` – data attribute for address
+- `button[jsaction*="review.expand"]` – Google's internal action route (see "Expand button lesson")
 - `h1` – business name (standard HTML tag)
 
 **Fragile** (likely to change):
