@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { chromium, type BrowserContext, type Page } from "playwright";
 import { logger } from "../utils/logger.js";
+import { VOLATILE_STORAGE_TYPES } from "./storage-types.js";
 
 export interface BrowserOptions {
   headless: boolean;
@@ -69,5 +70,41 @@ export async function closeBrowser(context: BrowserContext): Promise<void> {
     // Browser may already be closed
   } finally {
     activeContexts.delete(context);
+  }
+}
+
+/**
+ * Clear volatile per-origin browser state (service workers, cache storage,
+ * localStorage, IndexedDB) via CDP. Used between sequential scrapes to prevent
+ * cross-contamination from stale SPA state. Cookies are preserved so Google
+ * authentication remains intact. Best-effort: logs and continues on failure.
+ *
+ * The caller passes the target origin so `browser.ts` stays provider-agnostic.
+ * Adds ~50-150ms overhead per call (newCDPSession + send + detach).
+ *
+ * Requires Playwright >=1.11 for `newCDPSession`.
+ */
+export async function clearVolatileBrowserState(
+  page: Page,
+  origin: string,
+): Promise<void> {
+  let cdp: Awaited<ReturnType<BrowserContext["newCDPSession"]>> | null = null;
+  try {
+    cdp = await page.context().newCDPSession(page);
+    await cdp.send("Storage.clearDataForOrigin", {
+      origin,
+      storageTypes: VOLATILE_STORAGE_TYPES,
+    });
+    logger.debug(`Cleared volatile browser state for ${origin}`);
+  } catch (err) {
+    logger.warn(
+      `Failed to clear volatile browser state for ${origin}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  } finally {
+    if (cdp) {
+      await cdp.detach().catch(() => {
+        // detach failures are non-fatal; session will be reaped when page closes
+      });
+    }
   }
 }

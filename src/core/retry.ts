@@ -1,4 +1,5 @@
 import { logger } from "../utils/logger.js";
+import { UnrecoverableError } from "./errors.js";
 
 export interface RetryOptions {
   maxRetries: number;
@@ -53,6 +54,11 @@ export async function withRetry<T>(
 }
 
 export function isUnrecoverable(error: Error): boolean {
+  // Typed unrecoverable errors we throw ourselves are detected structurally
+  // (no string matching required). Retained below: substring fallback for
+  // errors originating from Playwright or other libraries we cannot modify.
+  if (error instanceof UnrecoverableError) return true;
+
   const message = error.message.toLowerCase();
   return (
     message.includes("invalid input") ||
@@ -62,6 +68,7 @@ export function isUnrecoverable(error: Error): boolean {
     message.includes("executable doesn't exist") ||
     message.includes("browser has been closed") ||
     message.includes("browsertype.launch") ||
-    message.includes("sort verification failed")
+    message.includes("sort verification failed") ||
+    message.includes("navigation verification failed")
   );
 }

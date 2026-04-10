@@ -62,6 +62,43 @@ export function parseGoogleMapsInput(input: string): ParsedUrl {
   );
 }
 
+/**
+ * Compare an expected placeId against an actual placeId extracted from a loaded
+ * page. Used to detect cases where Google Maps serves cached SPA content for a
+ * previously-loaded location instead of honoring the requested URL.
+ *
+ * Returns true when:
+ * - `expected` is empty/null (no upfront expectation – short URLs, pre-redirect)
+ * - both values are present and match case-insensitively
+ *
+ * Returns false when `expected` is known but `actual` is null or differs.
+ *
+ * Callers must ensure both values are in the same format space (e.g., both in
+ * `0x...:0x...` form). Use `canVerifyPlaceIdFormat` to check whether an
+ * `expected` value is comparable against `extractPlaceIdFromUrl` output.
+ */
+export function placeIdsMatch(
+  expected: string | null,
+  actual: string | null,
+): boolean {
+  if (!expected) return true;
+  if (!actual) return false;
+  return expected.toLowerCase() === actual.toLowerCase();
+}
+
+/**
+ * Returns true if `placeId` is in the `0x...:0x...` format produced by
+ * `extractPlaceIdFromUrl`. ChIJ-style Place ID strings (produced by
+ * `parseGoogleMapsInput` for raw Place ID inputs) are NOT in this format and
+ * cannot be verified against the output of `extractPlaceIdFromUrl` – calling
+ * code must skip verification for them.
+ */
+export function canVerifyPlaceIdFormat(
+  placeId: string | null,
+): placeId is string {
+  return typeof placeId === "string" && placeId.startsWith("0x");
+}
+
 export function extractPlaceIdFromUrl(url: string): string | null {
   // Decode percent-encoded chars (e.g., %3A → :) so regex matches URLs
   // processed by URLSearchParams, which encodes colons in query values
