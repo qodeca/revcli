@@ -17,25 +17,32 @@ export interface RawReview {
 
 /**
  * Expand all truncated review texts by clicking "More" buttons.
+ * Chained `locator(reviewCard).locator(expandButton)` scopes the
+ * comma-list to card subtrees (see tests/extractor-selectors.test.ts)
+ * and returns only real matches, avoiding per-empty-card click timeouts.
  */
 export async function expandAllReviews(page: Page): Promise<void> {
+  const moreButtons = page
+    .locator(SELECTORS.reviewCard)
+    .locator(SELECTORS.expandButton);
+
+  let count: number;
   try {
-    const moreButtons = page.locator(
-      `${SELECTORS.reviewCard} ${SELECTORS.expandButton}`,
-    );
-    const count = await moreButtons.count();
-    for (let i = 0; i < count; i++) {
-      try {
-        await moreButtons.nth(i).click({ timeout: 500 });
-      } catch {
-        // Button may have disappeared or been already clicked
-      }
-    }
-    if (count > 0) {
-      logger.debug(`Expanded ${count} truncated reviews`);
-    }
+    count = await moreButtons.count();
   } catch {
-    // No expandable reviews
+    return;
+  }
+
+  for (let i = 0; i < count; i++) {
+    try {
+      await moreButtons.nth(i).click({ timeout: 500 });
+    } catch {
+      // Button detached, re-rendered, or already expanded
+    }
+  }
+
+  if (count > 0) {
+    logger.debug(`Expanded ${count} truncated reviews`);
   }
 }
 
