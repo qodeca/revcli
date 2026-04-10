@@ -32,17 +32,19 @@ src/scraper/scrape-location.ts  ── shared orchestrator, accepts ParsedUrl (u
 │
 ├── browser.ts              ── persistent Chromium context (~/.revcli/chrome-profile/), anti-detection, SIGINT cleanup
 ├── auth.ts                 ── isSignedIn(), hasLimitedView(), waitForUserAuth() – Google auth detection
-├── navigator.ts            ── orchestrates consent → locale → limited-view check → tab → sort
+├── navigator.ts            ── orchestrates state eviction → consent → locale → limited-view check → tab → sort; verifies loaded placeId against parsed.placeId
 ├── consent.ts              ── Google consent handling, hl=en enforcement, g_ep/entry stripping
 ├── business-extractor.ts   ── business name/rating/totalReviews/address extraction
 ├── scroller.ts             ── mouse wheel scrolling, deduplication by review ID, exponential backoff stale-scroll detection, loading spinner awareness
 ├── extractor.ts            ── single page.evaluate() for bulk DOM extraction, staleness warnings
 ├── parser.ts               ── RawReview → validated Review via Zod, language detection
-└── selectors.ts            ── ALL Google Maps CSS selectors in one place (fragile, version-dated)
+├── selectors.ts            ── ALL Google Maps CSS selectors in one place (fragile, version-dated)
+└── storage-types.ts        ── pure VOLATILE_STORAGE_TYPES constant (CDP storage tokens cleared before each scrape; cookies excluded)
 
 src/core/
 ├── schema.ts       ── Zod schemas + SortOrder/OutputFormat union types + SORT_ORDERS/OUTPUT_FORMATS constants
-├── retry.ts        ── withRetry() – exponential backoff, isUnrecoverable() detection
+├── retry.ts        ── withRetry() – exponential backoff, isUnrecoverable() detection (instanceof UnrecoverableError + substring fallback)
+├── errors.ts       ── UnrecoverableError typed class with `kind` discriminator – prefer over magic-substring Error for anything we throw
 └── rate-limiter.ts ── minimum delay between operations
 
 src/output/

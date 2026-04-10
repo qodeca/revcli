@@ -262,7 +262,7 @@ npx playwright install chromium
 
 ```bash
 npm run dev -- scrape 'https://maps.app.goo.gl/...' -m 5    # Run from source
-npm test                                                      # Run all tests (140)
+npm test                                                      # Run all tests (161)
 npx vitest run tests/parser.test.ts                           # Run single test file
 npm run typecheck                                             # Type check
 npm run build                                                 # Build to dist/
@@ -281,7 +281,7 @@ src/
 │   ├── business-extractor.ts   # Business info extraction from DOM
 │   ├── scroller.ts, extractor.ts, parser.ts  # Review collection pipeline
 │   └── selectors.ts            # All Google Maps CSS selectors (update here when they break)
-├── core/           # Schema definitions (Zod), types (SortOrder, OutputFormat), retry, rate limiter
+├── core/           # Schema definitions (Zod), types (SortOrder, OutputFormat), retry, UnrecoverableError, rate limiter
 ├── output/         # writeOutput() dispatcher, JSON and CSV writers
 └── utils/          # URL parser, logger, batch progress
 ```
