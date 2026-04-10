@@ -3,7 +3,7 @@
  * Google uses obfuscated class names that change periodically.
  * Update this file when selectors go stale.
  *
- * Last verified: 2026-04-08
+ * Last verified: 2026-04-10
  */
 
 export const SELECTORS = {
@@ -22,7 +22,10 @@ export const SELECTORS = {
   reviewTimeContainer: "div.DU9Pgb",
   reviewTime: "span.rsqaWe",
   reviewText: "div.MyEned span.wiI7pd",
-  expandButton: 'button.w8nwRe, button:has-text("More")',
+  // Fallback uses `jsaction` not `:has-text("More")` – the latter
+  // substring-matches reviewer names like "KHALID ALMORET" (AL·MORE·T)
+  // and opens their Local Guide profile on click.
+  expandButton: 'button.w8nwRe, button[jsaction*="review.expand"]',
 
   // Owner response
   ownerResponseContainer: "div.CDe7pd",
