@@ -50,6 +50,17 @@ export const SELECTORS = {
   addressButton:
     'button[data-item-id="address"] div.fontBodyMedium, [data-item-id="address"]',
 
+  // Review count badge – aria-label containing "review" case-insensitively.
+  // Google Maps renders the total review count in an aria-label on narrow
+  // viewports and some place types (e.g. hotels) where the Reviews tab text
+  // only shows "Reviews" without a count.
+  reviewBadge: '[aria-label*="review" i]',
+
+  // Main content region of Google Maps. Used to scope body-text fallbacks so
+  // the parser doesn't grab review-count digits from reviewer profile sidebar
+  // text or unrelated header chrome.
+  mainRegion: '[role="main"]',
+
   // Loading indicator shown during lazy-loading of reviews
   // Multiple selectors as fallbacks since Google changes these frequently
   // Material Design spinner at bottom of scroll container during lazy-loading

@@ -31,7 +31,7 @@ export async function navigateToReviews(
   page: Page,
   parsed: ParsedUrl,
   sortOrder: SortOrder,
-): Promise<Omit<Business, "scrapeDate">> {
+): Promise<Omit<Business, "scrapeDate" | "headerTotalReviews">> {
   // Use `off` then `on` so re-entering this function (e.g., after auth retry
   // in scrape-location.ts) does not stack multiple listeners on the same page.
   page.off("dialog", acceptDialog);
