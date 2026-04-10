@@ -1,4 +1,5 @@
 import { Command, InvalidArgumentError } from "commander";
+import pkg from "../package.json" with { type: "json" };
 import { scrapeCommand } from "./commands/scrape.js";
 import { batchCommand } from "./commands/batch.js";
 import { validateCommand } from "./commands/validate.js";
@@ -24,7 +25,7 @@ const program = new Command();
 program
   .name("revcli")
   .description("Scrape Google Maps location reviews")
-  .version("0.1.0");
+  .version(pkg.version);
 
 program
   .command("scrape")
