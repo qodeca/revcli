@@ -1,6 +1,6 @@
 # revcli
 
-![Node](https://img.shields.io/badge/node-%3E%3D22-brightgreen) ![TypeScript](https://img.shields.io/badge/TypeScript-5.8-blue) ![Playwright](https://img.shields.io/badge/Playwright-1.52-green) ![License](https://img.shields.io/badge/license-MIT-blue)
+![Node](https://img.shields.io/badge/node-%3E%3D22-brightgreen) ![TypeScript](https://img.shields.io/badge/TypeScript-5.8-blue) ![Playwright](https://img.shields.io/badge/Playwright-1.52-green) ![License](https://img.shields.io/badge/license-GPL--3.0--only-blue)
 
 A command-line tool that scrapes Google Maps location reviews using browser automation. No API key required.
 
@@ -379,4 +379,4 @@ This tool automates a web browser to access publicly available information on Go
 
 ## License
 
-[MIT](LICENSE)
+[GPL-3.0-only](LICENSE)
