@@ -46,7 +46,11 @@ export async function navigateToReviews(
   // intact. See issue #4.
   await clearVolatileBrowserState(page, GOOGLE_MAPS_ORIGIN);
 
-  const waitUntil = parsed.isShortUrl ? "networkidle" : "domcontentloaded";
+  // Google Maps' SPA keeps polling, so `networkidle` is never reached and a
+  // short URL (redirected via HTTP 3xx) times out after 30s. `domcontentloaded`
+  // resolves once the redirect target's DOM is loaded; the `waitForSelector`
+  // below confirms the place panel is actually present.
+  const waitUntil = "domcontentloaded";
   logger.debug(`Navigating to ${targetUrl}`);
   await page.goto(targetUrl, { waitUntil, timeout: 30000 });
 
@@ -104,6 +108,32 @@ export async function navigateToReviews(
   return businessInfo;
 }
 
+/**
+ * Google Maps virtualizes the review list: after the Reviews tab is clicked it
+ * renders only the summary and filter chips and defers the first batch of
+ * review cards until a real mouse-wheel scroll fires on the scroll container.
+ * Nudge the container once so `reviewCard` nodes exist before we wait on them,
+ * otherwise openReviewsTab blocks until its 15s waitForSelector times out.
+ */
+async function scrollReviewsIntoView(page: Page): Promise<void> {
+  const containerSel = await page.evaluate((candidates) => {
+    for (const sel of candidates) {
+      const el = document.querySelector(sel);
+      if (el && el.scrollHeight > el.clientHeight) return sel;
+    }
+    return null;
+  }, SELECTORS.scrollContainers);
+
+  if (!containerSel) return;
+
+  const box = await page.locator(containerSel).first().boundingBox();
+  if (!box) return;
+
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.wheel(0, 800);
+  await page.waitForTimeout(1500);
+}
+
 async function openReviewsTab(page: Page): Promise<void> {
   await page.waitForSelector(SELECTORS.tab, { timeout: 10000 });
   await page.waitForTimeout(1000);
@@ -142,6 +172,10 @@ async function openReviewsTab(page: Page): Promise<void> {
       );
     }
   }
+
+  // The review list is virtualized – the first batch of cards only renders
+  // after a real scroll event, so nudge the container before waiting.
+  await scrollReviewsIntoView(page);
 
   await page.waitForSelector(SELECTORS.reviewCard, { timeout: 15000 });
   await page.waitForTimeout(1000);
