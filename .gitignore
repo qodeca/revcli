@@ -4,3 +4,6 @@ dist/
 .env
 /output/
 *.log
+
+# Xezar local runtime: task history, transcripts, worktrees. Never committed.
+.local/

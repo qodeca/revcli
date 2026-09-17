@@ -1,0 +1,10 @@
+{
+  "settings": { "directTools": true },
+  "mcpServers": {
+    "xezar": {
+      "command": "npx",
+      "args": ["-y", "@qodeca/xezar", "mcp"],
+      "lifecycle": "keep-alive"
+    }
+  }
+}
