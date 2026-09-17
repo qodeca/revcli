@@ -20,7 +20,7 @@ revcli is an open-source MIT-licensed CLI (`revcli`) that scrapes Google Maps lo
 
 ## Constraints
 - ESM only (`"type": "module"`, `.js` extensions on relative imports), Node 22+, strict TypeScript, zero `any`. Types are derived from Zod with `z.infer<>`; constants `SORT_ORDERS` / `OUTPUT_FORMATS` / `VOLATILE_STORAGE_TYPES` are single sources of truth.
-- This repo is driven only by OpenCode and pi with local models. Do not switch agent, and do not introduce Claude Code or Codex configuration.
+- This repo is driven only by open-source agent clients (OpenCode, pi, Qwen) with local models. Do not switch agent, and do not introduce Claude Code or Codex configuration.
 - All Google Maps selectors live in `src/scraper/selectors.ts` (version-dated). Scope with chained locators, never concatenated selector strings. Prefer semantic attributes (`jsaction`, `aria-*`, `data-*`, ARIA roles) over obfuscated classes and never over visible text.
 - Failure taxonomy matters: an `UnrecoverableError` with a `kind` is never retried by `withRetry()`; per-review `rating: 0` is a sentinel for a stale stars selector, while a business-level rating that cannot be parsed is `null`, not 0.
 - The browser is headed by default (auth needs a visible window) and the persistent profile in `~/.revcli/chrome-profile/` holds the owner's Google session — never sign in on their behalf, never copy or expose that profile, and treat a live scrape as authorized only when the task says so.

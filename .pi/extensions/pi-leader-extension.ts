@@ -71,7 +71,7 @@ const DESCRIPTOR_FILE = 'pi-leader.json';
 const XEZAR_DATA_DIR = join('.local', 'xezar');
 /** A Unix socket path is limited to ~104 bytes on macOS, so it never lives under the repository. */
 const SOCKET_PREFIX = 'xez-pi-';
-const SOCKET_FILE = 'leader.sock';
+const SOCKET_FILE = 's.sock';
 
 /**
  * A private `0700` directory to put the socket in, or `undefined` if we cannot have one.
@@ -369,8 +369,8 @@ function safeSessionId(ctx: ExtensionContextLike): string {
   } catch {
     return `pid-${process.pid}`;
   }
-  // Never let a session id become a path of its own.
-  const clean = id.replace(/[^A-Za-z0-9_-]/g, '').slice(0, 40);
+  // Never let a session id become a path of its own, and keep it short to stay well under macOS's 104-byte socket path limit.
+  const clean = id.replace(/[^A-Za-z0-9_-]/g, '').slice(0, 20);
   return clean.length > 0 ? clean : `pid-${process.pid}`;
 }
 

@@ -20,7 +20,7 @@ Docs here are operative: agents and users run what they say. A wrong command in 
 - Wrap example URLs in **single quotes** — Google Maps URLs contain `!`, which zsh/bash expand as history.
 - Test count and file list in `AGENTS.md` only change when you have counted: `ls tests/*.test.ts | wc -l` and the `npm test` summary.
 - Version numbers come from `package.json`; the CLI reads it at runtime. Do not hand-copy a version into prose unless the task is a release.
-- Preserve guidance that already exists and is still true. Extend or correct; do not rewrite the architecture or conventions wholesale, and never replace this repo's agent policy (OpenCode and pi with local models only) with another agent's setup.
+- Preserve guidance that already exists and is still true. Extend or correct; do not rewrite the architecture or conventions wholesale, and never replace this repo's agent policy (open-source clients with local models only) with another agent's setup.
 - Selector tables change together with `src/scraper/selectors.ts`, in the same change, and say which fallback caught what.
 - Keep the honest boundary in prose: what the automated suite proves (pure functions, offline) versus what only a signed-in live scrape proves.
 

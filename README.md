@@ -331,7 +331,7 @@ npm run typecheck                                             # Type check
 npm run build                                                 # Build to dist/
 ```
 
-Architecture, data-flow patterns, and coding conventions are documented in [CLAUDE.md](CLAUDE.md). Read it before making structural changes – it captures hard-won lessons (Playwright locator scoping, typed unrecoverable errors, `hl=en` invariant, etc.) that aren't obvious from the source.
+Architecture, data-flow patterns, and coding conventions are documented in [AGENTS.md](AGENTS.md). Read it before making structural changes – it captures hard-won lessons (Playwright locator scoping, typed unrecoverable errors, `hl=en` invariant, etc.) that aren't obvious from the source.
 
 ### Project structure
 
@@ -351,7 +351,7 @@ src/
 └── utils/          # URL parser, logger, batch progress
 ```
 
-See [CLAUDE.md](CLAUDE.md) for architecture details and coding conventions.
+See [AGENTS.md](AGENTS.md) for architecture details and coding conventions.
 
 ## Reporting a bug
 

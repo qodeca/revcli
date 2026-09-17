@@ -32,7 +32,7 @@ can still reach the operator.
 
 | Workflow | What it is for |
 | --- | --- |
-| `fix-and-verify` | The minimal built-in-style flow: do the task, run `npm test`, retry the authoring step twice on failure. Authored before this kit existed; left byte-for-byte as it was. |
+| `fix-and-verify` | The minimal built-in-style flow: prepare dependencies, do the task, run `npm test`, retry the authoring step twice on failure. |
 | `bug-fix` | Reproduce, pin with a regression test, fix the cause, then typecheck and the suite. |
 | `feature-implementation` | Contract-first feature work with tests, docs and the build. |
 | `testing-and-verification` | Add or strengthen coverage in the repo's pure-function style. |
@@ -120,18 +120,12 @@ What the Xezar project's own kit has, and why it is not copied here:
 
 ## Still to do by a person
 
-1. Commit `.xezar/` if you want task worktrees to carry it. The cockpit reads it from this checkout
-   either way, but a worktree branched off `main` only receives it through Git; today `AGENTS.md`,
-   `opencode.json`, `.pi/` and `.xezar/` are still untracked.
-2. Optional: add the same `Prepare dependencies` step (`[ -d node_modules ] || npm ci`) as the first
-   step of `fix-and-verify`, so that workflow's `npm test` also works in a fresh worktree. It was
-   authored by hand for this repo and is left untouched here.
-3. Run the checks once in a fresh worktree to confirm the timings you like (`npm ci` over the
+1. Run the checks once in a fresh worktree to confirm the timings you like (`npm ci` over the
    Playwright package is the slow step), and adjust `timeout` on the authoring steps if two hours is
    too generous.
-4. Decide whether the team skills should be curated down in Settings → Skills, and whether live
+2. Decide whether the team skills should be curated down in Settings → Skills, and whether live
    scrape verification (which needs `revcli auth` and a visible browser) is something you want agents
    to attempt at all — every skill in this kit currently treats a live scrape as the operator's check
    and reports it as *not verifiable here* when it cannot run.
-5. If you later add labels or a CI workflow to this repository, update `pipeline/config.json`
+3. If you later add labels or a CI workflow to this repository, update `pipeline/config.json`
    (`labels.enabled`, `ci.maxWaitMinutes`) in the same change; until then both stay off deliberately.
