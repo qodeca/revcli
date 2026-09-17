@@ -28,3 +28,26 @@ describe("expandButton selector scoping", () => {
     expect(naive).not.toMatch(/,\s*div\.jftiEf\s+button\[jsaction/);
   });
 });
+
+describe("viewOriginalButton selector", () => {
+  it("uses the semantic jsaction route, not text substring", () => {
+    // Regression: the translated-review toggle was detected via text
+    // (`:has-text("See original")`), but the button text changes between
+    // states ("See original (X)" vs "See translation (Y)") and could
+    // collide with reviewer content. The jsaction route
+    // (`review.showReviewInOriginal` / `review.showReviewInTranslation`)
+    // is stable across both states and cannot collide with reviewer data.
+    expect(SELECTORS.viewOriginalButton).toContain('jsaction*="review.showReview"');
+    expect(SELECTORS.viewOriginalButton).not.toContain("has-text");
+  });
+
+  it("matches both toggle states with a single selector", () => {
+    // The same button is present whether showing the translation or the
+    // original; only aria-checked and the jsaction route flip. A single
+    // selector lets us detect, open, and restore the toggle without
+    // depending on which state it is currently in.
+    expect(SELECTORS.viewOriginalButton).toBe(
+      'button[jsaction*="review.showReview"]',
+    );
+  });
+});

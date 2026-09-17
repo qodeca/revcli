@@ -1,6 +1,7 @@
 import type { Page } from "playwright";
 import type { Review } from "../core/schema.js";
 import {
+  captureOriginalTexts,
   expandAllReviews,
   extractReviews,
   type RawReview,
@@ -145,6 +146,12 @@ async function collectFromCurrentSort(
     await expandAllReviews(page);
 
     const rawReviews = await extractReviews(page);
+    // Capture original text for translated reviews not yet collected. Filtering
+    // on collectedIds ensures each review is toggled at most once per scrape.
+    await captureOriginalTexts(
+      page,
+      rawReviews.filter((r) => !collectedIds.has(r.reviewId)),
+    );
     const newCount = collectNewReviews(
       rawReviews,
       collectedIds,
@@ -168,6 +175,10 @@ async function collectFromCurrentSort(
 
         // Re-extract after loading completes
         const retryRaw = await extractReviews(page);
+        await captureOriginalTexts(
+          page,
+          retryRaw.filter((r) => !collectedIds.has(r.reviewId)),
+        );
         const retryNewCount = collectNewReviews(
           retryRaw,
           collectedIds,

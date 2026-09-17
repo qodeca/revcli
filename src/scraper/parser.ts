@@ -87,17 +87,14 @@ export function parseReview(raw: RawReview): Review | null {
         raw.text?.slice(0, 50),
       );
 
-    // Determine original vs translated text
-    let text = raw.text;
-    let originalText = raw.originalText;
-    let originalLanguage: string | null = null;
-
-    if (originalText && text) {
-      originalLanguage = detectLanguage(originalText);
-    } else if (text) {
-      originalText = text;
-      originalLanguage = detectLanguage(text);
-    }
+    // Determine original vs translated text. The extractor sets
+    // originalText/originalLanguage ONLY for reviews Google actually translated
+    // (detected via the "See original (X)" toggle). A non-translated review has
+    // a genuine null originalText – NOT a mirror of the display text, which was
+    // the old misleading behavior.
+    const text = raw.text;
+    const originalText = raw.originalText;
+    const originalLanguage = raw.originalLanguage;
 
     if (raw.rating === 0) {
       logger.warn(

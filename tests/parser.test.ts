@@ -16,6 +16,8 @@ function makeRawReview(overrides: Partial<RawReview> = {}): RawReview {
     rating: 5,
     text: "Great place!",
     originalText: null,
+    originalLanguage: null,
+    isTranslated: false,
     photos: 0,
     ownerResponseText: null,
     ownerResponseTime: null,
@@ -44,17 +46,23 @@ describe("parseReview", () => {
     expect(result!.id).toMatch(/^[0-9a-f]{16}$/);
   });
 
-  it("copies text to originalText when originalText is null", () => {
+  it("keeps originalText null for a non-translated review (no mirror)", () => {
     const result = parseReview(
       makeRawReview({ text: "Hello", originalText: null }),
     );
     expect(result!.text).toBe("Hello");
-    expect(result!.originalText).toBe("Hello");
+    expect(result!.originalText).toBeNull();
+    expect(result!.originalLanguage).toBeNull();
   });
 
   it("keeps both text and originalText when both present", () => {
     const result = parseReview(
-      makeRawReview({ text: "Translated", originalText: "أصلي" }),
+      makeRawReview({
+        text: "Translated",
+        originalText: "أصلي",
+        originalLanguage: "arabic",
+        isTranslated: true,
+      }),
     );
     expect(result!.text).toBe("Translated");
     expect(result!.originalText).toBe("أصلي");

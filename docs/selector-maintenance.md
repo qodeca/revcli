@@ -38,7 +38,9 @@ Look for the repeating container element that wraps each review. Previously `div
 | **Stars** | `span[role="img"]` with `aria-label="N stars"` | `span.kvMYJc[role="img"]` |
 | **Review time** | Span showing "2 weeks ago" (inside review metadata, NOT inside owner response) | `span.rsqaWe` inside `div.DU9Pgb` |
 | **Review text** | Text span inside a content div | `span.wiI7pd` inside `div.MyEned` |
+| **Review text container** | Content div that carries the `lang` attribute of the currently-displayed text (`en` for the Google translation, the original ISO code once toggled) | `div.MyEned` |
 | **Expand button** | Review-text / owner-response "Read more" button (see "Expand button lesson" below before editing) | `button.w8nwRe, button[jsaction*="review.expand"]` |
+| **Translated-review toggle** | Button that switches a translated review between the Google translation and its original language (see "Translated-review toggle lesson" below before editing) | `button[jsaction*="review.showReview"]` |
 | **Owner response** | Container below review text | `div.CDe7pd` |
 | **Response text** | `div.wiI7pd` (note: div, not span – different from review text) | `div.wiI7pd` inside `div.CDe7pd` |
 | **Response time** | Span with relative time inside response | `span.DZSIDd` |
@@ -101,6 +103,30 @@ The `expandButton` selector has gone through three revisions. Future maintainers
 
 **Call-site reference**: `expandAllReviews()` in `src/scraper/extractor.ts`. The string-level regression guard is `tests/extractor-selectors.test.ts`.
 
+### 5b. Translated-review toggle lesson – the original text is NOT pre-rendered
+
+Google automatically translates reviews written in a language other than the UI locale (revcli forces `hl=en`). A translated review renders a toggle button, and the **original-language text is not present in the DOM** – it only appears after clicking the toggle, which swaps the review text span to the original language. Reading the review text span directly therefore returns the *translation*, never the original.
+
+**State table** (verified live, 2026-09-17):
+
+| State | `aria-checked` | `jsaction` route | `div.MyEned[lang]` | `span.wiI7pd` text | Button text |
+|-------|----------------|------------------|--------------------|--------------------|-------------|
+| Translation shown | `"true"` | `...showReviewInOriginal` | `"en"` | English translation | `See original (Polish)` |
+| Original shown | `"false"` | `...showReviewInTranslation` | `"pl"` | Original Polish | `See translation (English)` |
+| Restored | `"true"` | `...showReviewInOriginal` | `"en"` | English translation | `See original (Polish)` |
+
+**Why this matters:**
+- Detecting a translated review by the presence of the toggle button is the only reliable signal. The human-readable language name is in the button text parenthetical (`See original (Polish)`); the ISO code is in `div.MyEned[lang]` **after** toggling.
+- The button text changes between states (`See original (X)` vs `See translation (Y)`), so a `:has-text("See original")` substring match only catches the translation-shown state and can be brittle. The semantic `jsaction` route (`review.showReviewInOriginal` / `review.showReviewInTranslation`) is stable across both states and cannot collide with reviewer content.
+- The `aria-checked` attribute is the reliable state signal: `"true"` means the translation is displayed, `"false"` means the original is displayed.
+
+**How the scraper captures the original text:**
+1. During bulk extraction, `extractReviews()` records `isTranslated` (toggle button present) and the raw button text as a language hint, parsed Node-side by `extractOriginalLanguageFromButtonText()`.
+2. `captureOriginalTexts()` is called (in `scroller.ts`) with only not-yet-collected reviews, toggling each to the original, reading the text and `lang`, then restoring the translation. Filtering by collected IDs ensures each review is toggled at most once per scrape.
+3. `parseReview()` in `parser.ts` then uses the captured `originalText`/`originalLanguage` directly. The old behavior of mirroring `originalText = text` was removed because it produced meaningless data.
+
+**Call-site reference**: `captureOriginalTexts()`, `readOriginalText()`, and `waitForToggleState()` in `src/scraper/extractor.ts`. The pure helper `extractOriginalLanguageFromButtonText()` and the `viewOriginalButton` selector are regression-guarded in `tests/extractor.test.ts` and `tests/extractor-selectors.test.ts`.
+
 ### 6. Tips
 
 - **`data-review-id`** and **`role="img"`** with **`aria-label="N stars"`** are semantic attributes that tend to survive class name changes
@@ -129,6 +155,7 @@ The `expandButton` selector has gone through three revisions. Future maintainers
 - `div[role="menuitemradio"]` – ARIA role for sort options
 - `button[data-item-id="address"]` – data attribute for address
 - `button[jsaction*="review.expand"]` – Google's internal action route (see "Expand button lesson")
+- `button[jsaction*="review.showReview"]` – Google's internal action route for the translated-review toggle (see "Translated-review toggle lesson")
 - `h1` – business name (standard HTML tag)
 
 **Fragile** (likely to change):
