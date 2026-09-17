@@ -7,6 +7,8 @@ description: Add or strengthen tests in revcli — pure-function tests at the bo
 
 The suite is `vitest run` over `tests/*.test.ts` and it is deliberately **pure**: parser, schema, url, csv, json, retry, rate-limiter, consent, unrecoverable, batch-utils, validate, scroller, storage-types, scrape-location, extractor-selectors. No test launches a browser; the Playwright-coupled modules are covered by testing the pure decision inside them, not by driving Google Maps.
 
+The suite's scope is pinned in `vitest.config.ts` (`include: ["tests/**/*.test.ts"]`) — without it the default glob also sweeps the test copies inside Xezar peer-task worktrees under `.local/`, and a run then reports other tasks' work-in-progress as yours. If `npm test` prints a file count far above `ls tests/*.test.ts | wc -l`, that config has regressed; fix it before trusting any result.
+
 ## Running
 
 - All: `npm test`. One file: `npx vitest run tests/parser.test.ts`. Watch: `npm run test:watch`.

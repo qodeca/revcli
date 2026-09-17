@@ -21,6 +21,7 @@
   },
   "paths": {
     "specs": "docs/specs",
+    "research": "docs/research",
     "runs": ".local/pipeline/runs",
     "analysis": ".local/pipeline/analysis",
     "scripts": ".local/pipeline/scripts",

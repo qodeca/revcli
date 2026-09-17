@@ -8,7 +8,7 @@ description: revcli's canonical verification — which commands prove the repo h
 revcli has no CI workflow and no lint script. The evidence that this repository is healthy is three npm scripts, in this order:
 
 1. `npm run typecheck` — `tsc --noEmit`, strict TypeScript, zero `any` allowed.
-2. `npm test` — `vitest run`, the pure-function suite (15 files: parser, schema, url, csv, json, retry, rate-limiter, consent, unrecoverable, batch-utils, validate, scroller, storage-types, scrape-location, extractor-selectors).
+2. `npm test` — `vitest run`, the pure-function suite (15 files: parser, schema, url, csv, json, retry, rate-limiter, consent, unrecoverable, batch-utils, validate, scroller, storage-types, scrape-location, extractor-selectors). Its scope is pinned to `tests/` by `vitest.config.ts`; if the run's file count exceeds the files in `tests/`, that config has regressed and the run proves nothing — repair the config first.
 3. `npm run build` — `tsup`, ESM bundle with shebang into `dist/`; it is what an installed `revcli` actually runs.
 
 Focused runs while working: `npx vitest run tests/parser.test.ts` (or any single file), `npm run test:watch` for iteration. Run the focused file for the code you touched; run all three gates before you call work done.

@@ -19,7 +19,7 @@ Silent-zero-results and `rating: 0` storms are selector staleness, not scraper l
 ## 2. Diagnose from evidence
 
 - Read the actual output and the real code path before theorising. `--verbose` prints the scrubbed header candidates and which selector source produced the parse.
-- Suspect in the order history has taught this repo: `src/scraper/selectors.ts` first, then stale/cached page state (`clearVolatileBrowserState()` clears service workers, caches, localStorage and IndexedDB but keeps cookies — a place replayed from cache looks like cross-contamination), then sort/tab detection, then scroll termination math, then output.
+- Suspect in the order history has taught this repo: `src/scraper/selectors.ts` first, then stale/cached page state (`clearVolatileBrowserState()` clears service workers, caches, localStorage and IndexedDB but keeps cookies — a place replayed from cache looks like cross-contamination), then sort/tab detection, then scroll termination math, then output. Before any of that, rule out the input: navigate the reported URL in a fresh browser and confirm a place actually loads. Google redirects stale or hand-crafted place URLs (an old `data=!…` segment) to an empty page — an `h1` that resolves but never becomes visible is a dead URL, not a stale selector.
 - Check whether a guard fired rather than being absent: a `NAV_VERIFY` `UnrecoverableError` means the loaded placeId disagreed with the parsed one; that is a real signal, not noise to suppress.
 - `git log -S'<symbol>'` and `git log --oneline -- <path>` say when the behaviour arrived.
 

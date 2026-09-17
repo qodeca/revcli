@@ -16,7 +16,7 @@ including anything added later — are versionable by default.
   Unchanged by this kit: it was already authored for this repo.
 - `workflows/` — 12 role workflows (below). Xezar loads them plus its two built-ins (`quick-task`,
   and `project-setup`, which runs the team `xez-onboard` skill).
-- `skills/` — 13 project-local skills: the filled-in `project-conventions` plus twelve `revcli-*`
+- `skills/` — 14 project-local skills: the filled-in `project-conventions` plus thirteen `revcli-*`
   role playbooks. A skill's body becomes the agent's extra system prompt for that step.
 - `pipeline/config.json` — the software-pipeline configuration the **team** `xez-*` skills read:
   validation commands, tracker, browser provider, spec and runtime paths, review checklist pointer.
@@ -53,20 +53,21 @@ in your own worktree and post nothing — publishing a finding to GitHub is the 
 
 Discovery is local-first: `.xezar/skills` → `.ai/skills` → the `npx skills` install dirs and their
 per-agent mirrors → `~/.agents/skills`, `~/.claude/skills` → the team skills repo. A local file wins a
-name collision, so these twelve `revcli-*` skills shadow nothing that exists and are found before any
+name collision, so these thirteen `revcli-*` skills shadow nothing that exists and are found before any
 team skill.
 
 `project-conventions` (what good work looks like here — read by any step that wants the project's own
 definition of done), `revcli-quality-gates` (canonical verification and the no-fabrication rules),
 `revcli-implementation`, `revcli-bug-investigation`, `revcli-testing`, `revcli-selector-maintenance`,
 `revcli-docs-maintenance`, `revcli-dependency-maintenance`, `revcli-planning-spec`,
-`revcli-code-review`, `revcli-qa`, `revcli-issue-triage`, `revcli-research`.
+`revcli-code-review`, `revcli-qa`, `revcli-issue-triage`, `revcli-research`, `revcli-release`.
 
 ## Team skills repo
 
 `qodeca/xezar-skills` is Xezar's **default** skills source, so this project needs no `skillsRepos`
 key: with the key absent, all 39 `xez-*` skills resolve (verified with the installed loader against
-this checkout — 13 local skills, 39 team skills, 15 global). They bring the issue-to-PR automation
+this checkout — 13 local skills, 39 team skills, 15 global; the local count is 14 since
+`revcli-release` was added). They bring the issue-to-PR automation
 (`xez-auto-fix-issue`, `xez-auto-create-pr`, `xez-auto-review-pr`, `xez-qa-pr`), the spec and
 discovery skills, `xez-issue-create`, `xez-root-cause`, `xez-verify-in-repo`, and the pipeline
 configurator `xez-setup-agent-pipeline`. Their cache lives in `~/.cache/xez/skills/` and
@@ -107,7 +108,7 @@ What the Xezar project's own kit has, and why it is not copied here:
 - **`release`, `release-prep`, `integration`, `root-sync` workflows.** revcli has no CI workflow,
   publishes only through a manual `npm publish` (its `prepublishOnly` builds), and `config.json`
   forbids committing, pushing or publishing anything a task did not explicitly authorize. A
-  release role here would have nothing real to gate on.
+  release *workflow* would still have no CI gate to wait on. What exists instead is the `revcli-release` **skill**: it runs the three npm gates and an `npm pack --dry-run` tarball audit on the release candidate and emits the manual publish checklist — tagging, pushing and `npm publish` stay operator-only steps.
 - **`design`, `design-review` workflows and `docs/design-system/`.** This repository is a CLI: there
   is no UI, no design tokens and nothing in `designs/`.
 - **`.xezar/docs/` dogfooding documents** (`dogfooding.md`, `installation.md`, `phase-record.md`,

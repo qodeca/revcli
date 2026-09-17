@@ -5,7 +5,7 @@ description: Write a right-sized spec for a revcli change before building it —
 
 # Specifying work in revcli
 
-Write the spec before substantial work, sized to the change. Specs live in `docs/specs/` as `YYYY-MM-DD-<kebab-case-title>.md` (see `.xezar/pipeline/config.json` → `paths.specs`). A one-line flag tweak needs no spec; say so and stop rather than manufacturing one.
+Write the spec before substantial work, sized to the change. Specs go in `docs/specs/` as `YYYY-MM-DD-<kebab-case-title>.md`, the path `.xezar/pipeline/config.json` points at (`paths.specs`) — the directory is created by the first spec written. A one-line flag tweak needs no spec; say so and stop rather than manufacturing one.
 
 ## What goes in it
 
