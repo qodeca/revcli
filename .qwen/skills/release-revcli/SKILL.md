@@ -11,14 +11,14 @@ hooks:
 
 # Releasing revcli
 
-The repo's release runbook is **`../../docs/releasing.md`** — at the repository root, not
+The repo's release runbook is **`../../../docs/releasing.md`** — at the repository root, not
 inside this skill directory. It is authoritative: this skill gives you the shape and the
 rules, the runbook has the exact commands, the verification, and the recovery table.
 
 ## First: is this a release, or a question?
 
 **If the user is asking *about* releasing** — how the process works, what version is live, why
-a release failed, what is configured — answer from `../../docs/releasing.md` and **stop**. Do
+a release failed, what is configured — answer from `../../../docs/releasing.md` and **stop**. Do
 not dispatch anything: a dispatch is a real action against a live pipeline.
 
 Continue only when the user wants a release produced now.
@@ -32,7 +32,7 @@ workflow the user has not agreed to.
 ## The shape of a release
 
 Two dispatches with a PR merge between them. **Step 1 publishes nothing** — it only opens a
-PR. Each step in full is in `../../docs/releasing.md` §"The release, step by step".
+PR. Each step in full is in `../../../docs/releasing.md` §"The release, step by step".
 
 1. **Prepare** — dispatch `bump=patch|minor|major`. Opens a `release/vX.Y.Z` PR.
 2. **Merge** that PR, after adding the CHANGELOG entry to it.
@@ -47,7 +47,7 @@ what you want.
 
 ## Pre-flight
 
-Run the checklist in `../../docs/releasing.md` §Pre-flight checklist and stop on any failure.
+Run the checklist in `../../../docs/releasing.md` §Pre-flight checklist and stop on any failure.
 Two of its items are hard stops, because they decide whether the human gate exists at all:
 
 - **If `production` has no reviewer, stop and report.** Dispatching `existing` then publishes
@@ -76,7 +76,7 @@ is set. (It registers only in a trusted folder — treat it as a backstop, not t
 
 ## When something goes wrong
 
-Read `../../docs/releasing.md`: the symptom → cause → fix table, and the `script -q /dev/null`
+Read `../../../docs/releasing.md`: the symptom → cause → fix table, and the `script -q /dev/null`
 trick for npm operations that need 2FA.
 
 Two rules resolve most incidents:
