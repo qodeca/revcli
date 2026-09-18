@@ -1,0 +1,170 @@
+name: Release
+
+# The ONLY workflow in this repository that publishes to npm, and the only one that can
+# create a release tag. It is `workflow_dispatch`-only and never fires from a push: nothing
+# reaches the registry unless a maintainer asks for it by name and picks the bump.
+#
+# There is NO npm token anywhere in this repository. Publishing authenticates with npm
+# TRUSTED PUBLISHING (OIDC): GitHub mints a short-lived identity token for a job granted
+# `id-token: write`, and npm checks it against the trusted publisher configured on the
+# package — which names this repository AND this workflow file by name. Renaming this file,
+# or copying the publish step into another workflow, breaks the publish rather than silently
+# succeeding from somewhere unexpected. The one-time setup is in docs/publishing.md.
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: 'Version bump (`existing` publishes the version already in package.json)'
+        required: true
+        default: patch
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+          - existing
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Release ${{ inputs.bump }} to npm (latest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Releases from `main` (the stable trunk) or a `release/*` maintenance branch. Dispatch
+    # from the BRANCH, never a tag: workflow_dispatch reads this file from the ref it runs on,
+    # and a tag's copy is frozen, so a tag would still evaluate the old gate.
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')
+    # Gate the publish behind a required-reviewer approval. If the environment isn't
+    # configured yet, GitHub creates it on first use without reviewers (non-blocking); add
+    # reviewers at Settings → Environments → production before the first release.
+    environment: production
+    permissions:
+      contents: write # create the release tag + GitHub Release via the API
+      id-token: write # mint the OIDC token npm trusted publishing authenticates with
+      pull-requests: write # open the version-bump PR for patch/minor/major releases
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      # Trusted publishing needs npm 11.5.1+ for the OIDC exchange; `lts/*` ships well past
+      # that, and `registry-url` is what writes the .npmrc npm reads the registry from. The
+      # package-manager cache is left off so the publish job never relies on a stale cache.
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: lts/*
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      - name: Show npm version (trusted publishing needs >= 11.5.1)
+        run: npm --version
+
+      - name: Install dependencies
+        run: npm ci
+
+      # The same validation gate CI runs, on the exact revision being released — a green PR run
+      # is not a promise about the merge commit a release is cut from.
+      - name: Verify before release
+        run: |
+          npm run typecheck
+          npm test
+
+      # `scripts/release.mjs` stamps the version BEFORE building (so dist/index.js inlines the
+      # right one), then builds, then runs check:pack + test:package, then publishes. It FAILS
+      # when it has no credential — it never degrades to a dry run, so a green job here means the
+      # package really went to npm. No `env:` block: the OIDC token is minted from the job's
+      # `id-token: write` permission, so there is no secret to pass in and none to leak.
+      - name: Publish release
+        id: release
+        run: node scripts/release.mjs "${{ inputs.bump }}"
+
+      # `main` is PR-only, so a release never pushes a commit to it directly.
+      #   - `existing` (the version is already on main via its own PR) records nothing new here;
+      #     the tag + Release below capture the release point.
+      #   - patch/minor/major bump the manifest to a version that is NOT yet on main, so they
+      #     open a follow-up PR with the bump instead of pushing.
+      # The release tag itself is created from the released commit by the `Create GitHub
+      # Release` step via the API, which branch protection allows.
+      - name: Open version-bump PR (patch/minor/major only)
+        if: steps.release.outputs.published == 'true' && inputs.bump != 'existing'
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          BRANCH="release/v${VERSION}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add package.json
+          git commit -m "chore(release): v${VERSION}"
+          git push origin "$BRANCH"
+          gh pr create --base "${{ github.ref_name }}" --head "$BRANCH" \
+            --title "chore(release): v${VERSION}" \
+            --body "Record the \`v${VERSION}\` version bump that the Release workflow published to npm \`latest\`. Merge to keep \`${{ github.ref_name }}\`'s manifest in sync with the published version."
+
+      # The tag points at the exact commit the tarball was built from, so the release source and
+      # the npm artifact can never disagree about which revision shipped.
+      - name: Create GitHub Release
+        if: steps.release.outputs.published == 'true'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        with:
+          script: |
+            const version = process.env.VERSION;
+            const body = [
+              '## Published package',
+              '',
+              '| Package | Version | Dist-tag |',
+              '|---|---|---|',
+              '| `@qodeca/revcli` | `' + version + '` | `latest` |',
+              '',
+              '### Install',
+              '',
+              '```bash',
+              'npm install -g @qodeca/revcli@' + version,
+              'npx playwright install chromium',
+              'revcli --version',
+              '```',
+              '',
+              'Built from `' + context.sha + '`.',
+            ].join('\n');
+            await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: 'v' + version,
+              target_commitish: context.sha,
+              name: 'v' + version,
+              body,
+              draft: false,
+              prerelease: false,
+            });
+
+      - name: Write workflow summary
+        if: always() && steps.release.outputs.version != ''
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+          PUBLISHED: ${{ steps.release.outputs.published }}
+        run: |
+          {
+            echo "## 🚀 Release ${VERSION}"
+            echo ""
+            if [ "$PUBLISHED" = "true" ]; then
+              echo "Published \`@qodeca/revcli@${VERSION}\` to \`latest\` and tagged \`v${VERSION}\`."
+              echo ""
+              echo '```bash'
+              echo "npm install -g @qodeca/revcli@${VERSION}"
+              echo '```'
+            else
+              echo "⚠️ Nothing was published — this run did not perform a real release."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
