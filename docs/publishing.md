@@ -37,14 +37,28 @@ Order matters — bind and verify the publisher **before** restricting tokens, s
 path stays available until the OIDC path is proven.
 
 1. The `qodeca` npm org must exist with 2FA enabled.
-2. From a clean `main` checkout, run the bootstrap publish. It refuses to run unless `HEAD`
-   matches `origin/main` and the tree is clean, and it never uses OIDC, so the version it
-   ships carries **no provenance attestation** — that is expected for this one release.
+2. From a clean `main` checkout, run the bootstrap publish **under a pseudo-TTY**. It refuses
+   to run unless `HEAD` matches `origin/main` and the tree is clean, and it never uses OIDC,
+   so the version it ships carries **no provenance attestation** — expected for this one
+   release.
 
    ```bash
    git checkout main && git pull
-   node scripts/release.mjs existing --bootstrap
+   script -q /dev/null node scripts/release.mjs existing --bootstrap
    ```
+
+   **The `script` wrapper is not optional.** A 2FA-protected account makes `npm publish` fail
+   with `EOTP`, and npm opens its browser web-auth flow **only when stdout is a TTY**. Without
+   it npm errors immediately and prints an auth URL you cannot use. With it, npm prints:
+
+   ```
+   Authenticate your account at:
+   https://www.npmjs.com/auth/cli/<uuid>
+   ```
+
+   and polls. Open that URL in a browser signed in as the package owner and approve the
+   security-key prompt; npm publishes on its own. The URL is redacted in captured output and
+   npm rotates its debug logs quickly — read it from the live terminal.
 
    The script refuses to publish a version the registry already holds, or one that is not
    greater than the published `latest`.
@@ -57,6 +71,23 @@ path stays available until the OIDC path is proven.
    it — so a token path no longer exists alongside OIDC.
 6. Verify the next release is published by the workflow and that the registry shows a
    provenance attestation for it.
+
+### First-publish notes
+
+Two things behave differently from later releases:
+
+- **The registry is briefly inconsistent.** For roughly two minutes after a first publish the
+  **packument** (`GET /@qodeca%2Frevcli`) 404s while the **version endpoint**
+  (`/@qodeca%2Frevcli/0.1.3`) and the **tarball** return 200. `npm install` and `npm view`
+  read the packument, so both fail during that window even though the package exists. Check
+  the version endpoint, the tarball, or the npmjs.com page before concluding a publish failed.
+- **`release.mjs`'s post-publish check can report a false failure.** It verifies `latest`
+  immediately, so during that window it reads `null` and exits 1 on a publish that actually
+  succeeded. Confirm against the registry by hand; the retry fix is still outstanding (see
+  [release-learnings.md](release-learnings.md) §4.3).
+
+The bootstrap also creates **no tag and no GitHub Release** — it is a local publish, not the
+workflow. Create them by hand at the released commit.
 
 ## Trusted publishing
 
@@ -114,6 +145,8 @@ npm view @qodeca/revcli dist-tags --json
 | State | Do this |
 |---|---|
 | Failed **before** the publish step | Fix the cause and re-dispatch. Nothing reached the registry. |
+| `release.mjs` post-publish check failed, but the tarball is live | Registry lag — the publish **succeeded**. Do not re-dispatch; create the tag/Release by hand. |
+| `npm view` 404s but the npmjs.com page shows the version | Packument cache lag. The version endpoint and tarball are authoritative; wait ~2 minutes. |
 | Gate failed: "still running" | Wait for CI to finish, then re-dispatch. |
 | Gate failed: "concluded failure" | Fix CI on `main` first; the gate will not pass for that commit. |
 | Gate failed: "no CI run found" | The commit has no CI run on `main` (e.g. a `[skip ci]` merge). Push a new commit and release that. |

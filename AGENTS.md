@@ -19,8 +19,73 @@ npm test                                # Run all tests (vitest)
 npm run test:watch                      # Watch mode
 npx vitest run tests/parser.test.ts     # Run a single test file
 npm run typecheck                       # Type check without emitting
+npm run check:pack                      # Assert the tarball contract (dist present, no src/tests)
+npm run test:package                    # Pack + install into a temp consumer, assert --version
 npx playwright install chromium         # Required once before first scrape
+
+# Release (see "Release and publishing" below)
+node scripts/release.mjs patch|minor|major   # Prepare: stamp version + open a bump PR
+node scripts/release.mjs existing            # Publish the version committed on main
+node scripts/release.mjs existing --dry-run  # Rehearse the publish without publishing
 ```
+
+## Release and publishing
+
+revcli publishes to npm as **`@qodeca/revcli`**, only from `main`, only through
+`.github/workflows/release.yml` (`workflow_dispatch`). Runbook: [docs/publishing.md](docs/publishing.md).
+What was learned building it (npm 2FA, registry propagation, Actions gotchas):
+[docs/release-learnings.md](docs/release-learnings.md).
+
+### The two-step release (bump-first)
+
+1. Dispatch `Release` with `bump = patch | minor | major` → stamps `package.json` **and
+   `package-lock.json`**, opens a `release/vX.Y.Z` PR. **Publishes nothing.**
+2. Merge that PR.
+3. Dispatch `Release` with `bump = existing` → builds, verifies, publishes, tags `vX.Y.Z`,
+   creates the GitHub Release.
+
+The version on npm is therefore always the version committed on `main`: the tag, the manifest
+and the registry agree, and `latest` can only move forward. Do not "simplify" this back to
+stamp-then-publish — that is what makes the tag disagree with the manifest and lets `latest`
+regress.
+
+### Invariants — do not undo these
+
+- **Never put `${{ }}` in a `run:` block.** Pass it through `env:` and quote the variable.
+  A workflow input interpolated into a shell command is code execution in a job that can
+  publish to npm.
+- **Never add `registry-url` to `setup-node`** in the publish job. It writes an `_authToken`;
+  npm then skips the OIDC exchange and the publish fails with a misleading `ENEEDAUTH`/404.
+- **Never pass `--tag latest`** to `npm publish`. npm applies its "higher version already
+  published" guard only when the tag is *default*; an explicit `--tag latest` disables it.
+- **Publish with `--ignore-scripts` and install with `npm ci --ignore-scripts`**, so no
+  dependency lifecycle script runs while the job holds `id-token: write`.
+- **The gate is a separate job and fails loudly.** A job-level `if:` that skips reports as a
+  green run, and `environment:` protection is evaluated before any step runs.
+- **`release.mjs` refuses to publish without OIDC** unless `--bootstrap` is passed. There is
+  deliberately no token / `npm login` fallback — a laptop publish would bypass CI, the branch
+  check, the approval and provenance at once.
+- **`release.mjs` never stamps in `existing` mode.** The version it publishes is the one
+  committed on `main`.
+
+### Scripts
+
+- `scripts/release.mjs` — the orchestrator. `patch|minor|major` = prepare (stamp only);
+  `existing` = publish (registry pre-checks → build → `check:pack` → `test:package` → publish
+  → verify `latest`). `--dry-run` rehearses; `--bootstrap` permits the one-time local first
+  publish.
+- `scripts/check-pack.mjs` — tarball contract: `dist/index.js` present, no `src/`/tests,
+  name `@qodeca/revcli`, version matches the manifest.
+- `scripts/test-package.mjs` — packs, installs into a temp consumer with `--ignore-scripts`,
+  asserts `revcli --version` equals the manifest version.
+
+### Git conventions
+
+- `develop` → `main` lands as a **merge commit**; feature PRs into `develop` are
+  **squash**-merged. Match the direction.
+- Check the license before releasing: `git show origin/main:package.json | grep license`.
+  The tarball ships `LICENSE`, `README.md` and `package.json`, so a license mismatch ships
+  the wrong terms to every installer.
 
 ## Architecture
 
