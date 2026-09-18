@@ -24,7 +24,7 @@
     "cli",
     "playwright"
   ],
-  "license": "GPL-3.0-only",
+  "license": "MIT",
   "engines": {
     "node": ">=22"
   },
