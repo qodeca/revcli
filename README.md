@@ -203,6 +203,8 @@ revcli auth logout         # Clear session
 
 **How it works:** revcli uses a persistent Chrome profile at `~/.revcli/chrome-profile/`. Sign in once with `revcli auth`, and all subsequent scrapes reuse that session. Google auth cookies persist between CLI runs. The profile is a **credential store** holding your Google session cookies — it is created with owner-only (`0700`) permissions. Do not share it or back it up; anyone with read access to it can act as your signed-in session.
 
+`revcli auth` always leaves the browser window open: it closes once sign-in is detected, or when you close it yourself. If the profile is already signed in, the window stays open anyway so you can sign out and sign in with a different account — close it when you're done.
+
 ## Output schema
 
 <details>

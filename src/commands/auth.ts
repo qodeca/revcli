@@ -11,8 +11,10 @@ import {
   isSignedIn,
   hasLimitedView,
   waitForSignIn,
+  waitForBrowserClose,
 } from "../scraper/auth.js";
 import { handleConsent } from "../scraper/consent.js";
+import { UnrecoverableError } from "../core/errors.js";
 
 export async function authLoginCommand(): Promise<void> {
   logger.info("Opening Google Maps in Chrome...");
@@ -28,10 +30,7 @@ export async function authLoginCommand(): Promise<void> {
     await handleConsent(page);
     await page.waitForTimeout(3000);
 
-    if (await isSignedIn(page)) {
-      logger.success("Already signed in to Google Maps. No action needed.");
-      return;
-    }
+    const alreadySignedIn = await isSignedIn(page);
 
     console.log(`
   Sign in to your Google account:
@@ -41,13 +40,43 @@ export async function authLoginCommand(): Promise<void> {
   3. Complete any 2FA prompts if required
   4. Wait until Google Maps fully loads
 
-  The browser will close automatically once sign-in is detected.
+  The session is saved to ${PROFILE_DIR} and reused by every later run.
 `);
 
-    logger.info("Waiting for sign-in... (timeout: 5 minutes)");
+    // This command is the credential-entry step, so it must never short-circuit
+    // on an existing session: the window has to stay open for the user to sign
+    // in, switch accounts, or sign in again.
+    if (alreadySignedIn) {
+      logger.info(
+        "Already signed in. The browser stays open so you can switch accounts – close the window when you're done.",
+      );
+      await waitForBrowserClose(context);
+      logger.success("Browser closed. Google session saved for later runs.");
+      return;
+    }
 
-    await waitForSignIn(context, page);
-    logger.success("Signed in to Google Maps. Session saved.");
+    logger.info(
+      "Waiting for sign-in... The browser closes automatically once sign-in is detected (timeout: 5 minutes).",
+    );
+
+    const outcome = await waitForSignIn(context, page);
+    if (outcome === "browser-closed") {
+      logger.warn(
+        "Browser closed before sign-in was detected. Run `revcli auth status` to check the saved session.",
+      );
+      return;
+    }
+    logger.success("Signed in to Google Maps. Session saved for later runs.");
+  } catch (err) {
+    // Commander does not await async action handlers, so an escaping
+    // UnrecoverableError (the 5-minute timeout) would surface as an unhandled
+    // rejection with a raw stack trace.
+    if (err instanceof UnrecoverableError) {
+      logger.error(err.message);
+      process.exitCode = 1;
+      return;
+    }
+    throw err;
   } finally {
     await closeBrowser(context);
   }
