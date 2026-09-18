@@ -60,7 +60,9 @@ try {
     JSON.stringify({ name: 'revcli-smoke-consumer', version: '1.0.0', private: true }, null, 2) + '\n',
   );
   console.log(`test:package: installing ${packed.filename} into isolated consumer…`);
-  runNpm(['install', tarball], consumer);
+  // --ignore-scripts: `revcli --version` never launches a browser, so the consumer install
+  // must not pull a Chromium download (playwright's postinstall) in CI.
+  runNpm(['install', '--ignore-scripts', tarball], consumer);
 
   const binDir = path.join(consumer, 'node_modules', '.bin', 'revcli');
   const bin =
