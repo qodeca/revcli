@@ -1,5 +1,11 @@
 # revcli → npm release plan (enhanced)
 
+> **Historical — superseded.** This is the original plan and its v1 model. The design that
+> shipped is [ci-gated-release-plan.md](ci-gated-release-plan.md); the procedure is
+> [releasing.md](releasing.md). **Do not follow Phases B and C below** — they prescribe
+> `registry-url`, `--tag latest`, and stamp-then-publish, all of which were replaced. Kept as
+> the record of the original reasoning.
+
 This plan publishes `revcli` to npmjs.org as a standard package, modeled on an
 existing, proven scoped-package release process, and incorporates every actionable
 finding from the multi-lens review (see [Findings addressed](#findings-addressed)).

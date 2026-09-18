@@ -3,9 +3,10 @@
 Everything learned while taking `revcli` from "not on npm" to a published, gated release
 pipeline. Written for whoever touches the release path next — human or agent.
 
-Related: [docs/publishing.md](publishing.md) (the operational runbook),
+Related: [docs/releasing.md](releasing.md) (the operational runbook),
+[docs/publishing.md](publishing.md) (one-time setup),
 [docs/ci-gated-release-plan.md](ci-gated-release-plan.md) (the approved design),
-[docs/npm-release-plan.md](npm-release-plan.md) (the original release plan).
+[docs/npm-release-plan.md](npm-release-plan.md) (superseded — the original plan).
 
 ---
 
@@ -230,6 +231,9 @@ re-dispatches.
 
 ## 5. Where this stands
 
+This section is the single status record for the release setup — the other documents link
+here rather than restating it.
+
 Completed:
 
 | Item | Evidence |
@@ -244,6 +248,6 @@ Still open:
 
 | Item | Why it matters |
 |---|---|
-| Publishing access still allows bypass-2FA tokens | The package is set to "Require two-factor authentication **or** a granular access token with bypass 2fa enabled". Switch to "…and **disallow** bypass 2fa tokens" once nothing depends on the token path. |
+| Publishing access still allows bypass-2FA tokens | **Not yet applied.** The package is set to "Require two-factor authentication **or** a granular access token with bypass 2fa tokens". Switch it to "…and **disallow** bypass 2fa tokens" (Settings → Publishing access) once nothing depends on the token path. |
 | Bump PRs get no CI (§4.4) | Harmless today; changing it needs a PAT-opened PR. |
 | Consider the full 3-job split (finding 10) | The reduced form is in place; a separate verify/publish/record split would narrow the OIDC window further. |
