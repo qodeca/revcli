@@ -89,6 +89,10 @@ Expected job outcomes: `Gate — main, and green CI for this commit` ✓,
 > expected — the workflow opens it with `GITHUB_TOKEN` and GitHub does not trigger workflows
 > for token-created events. The gate verifies CI on the *merge commit* instead.
 
+> The `release/vX.Y.Z` branch is **deleted automatically when the PR merges** — the repository
+> has "automatically delete head branches" enabled. Nothing to clean up by hand. (A bump PR
+> that is closed unmerged leaves its branch behind; delete it manually.)
+
 ### 2. Merge the bump PR
 
 > **Add the CHANGELOG entry to the bump PR before merging.** `release.mjs` stamps only
