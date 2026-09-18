@@ -24,7 +24,7 @@ npm run test:package                    # Pack + install into a temp consumer, a
 npx playwright install chromium         # Required once before first scrape
 
 # Release (see "Release and publishing" below)
-node scripts/release.mjs patch|minor|major   # Prepare: stamp version + open a bump PR
+node scripts/release.mjs patch|minor|major   # Prepare: stamp package.json + lock (the workflow opens the bump PR)
 node scripts/release.mjs existing            # Publish the version committed on main
 node scripts/release.mjs existing --dry-run  # Rehearse the publish without publishing
 ```
@@ -32,9 +32,11 @@ node scripts/release.mjs existing --dry-run  # Rehearse the publish without publ
 ## Release and publishing
 
 revcli publishes to npm as **`@qodeca/revcli`**, only from `main`, only through
-`.github/workflows/release.yml` (`workflow_dispatch`). Runbook: [docs/publishing.md](docs/publishing.md).
+`.github/workflows/release.yml` (`workflow_dispatch`). Runbook: [docs/releasing.md](docs/releasing.md);
+one-time setup: [docs/publishing.md](docs/publishing.md).
 What was learned building it (npm 2FA, registry propagation, Actions gotchas):
-[docs/release-learnings.md](docs/release-learnings.md).
+[docs/release-learnings.md](docs/release-learnings.md). The Qwen Code skill
+`.qwen/skills/release-revcli/` mirrors this section for an agent driving a release.
 
 ### The two-step release (bump-first)
 

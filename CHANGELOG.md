@@ -7,10 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-09-18
+
+### Changed
+- Releases are now published by the `Release` GitHub Actions workflow through npm trusted
+  publishing (OIDC), and carry a SLSA provenance attestation.
+- A release is gated on a green CI run for the exact commit on `main`, and on a human
+  approval of the `production` environment.
+- Version bumps land on `main` as a PR before the publish, so the `vX.Y.Z` tag, `main`'s
+  manifest and the registry always agree.
+
 ## [0.1.3] - 2026-09-18
 
 ### Added
 - First public release to npm as `@qodeca/revcli`.
 
-[Unreleased]: https://github.com/qodeca/revcli/compare/v0.1.3...HEAD
+[Unreleased]: https://github.com/qodeca/revcli/compare/v0.1.4...HEAD
+[0.1.4]: https://github.com/qodeca/revcli/releases/tag/v0.1.4
 [0.1.3]: https://github.com/qodeca/revcli/releases/tag/v0.1.3
