@@ -27,13 +27,14 @@ on:
       bump:
         description: '`existing` publishes the version on main; patch/minor/major open a version-bump PR and publish nothing'
         required: true
-        default: existing
+        # `patch` is the default on purpose: a dispatch with no arguments must not publish.
+        default: patch
         type: choice
         options:
-          - existing
           - patch
           - minor
           - major
+          - existing
 
 permissions:
   contents: read

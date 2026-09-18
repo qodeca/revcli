@@ -6,7 +6,7 @@ Guidance for coding agents working in this repository.
 
 This project is managed only by open-source agent clients — OpenCode, pi, and Qwen — running local models attached to those clients. There is no Claude Code or Codex setup here, and none should be introduced. Project guidance lives in this file (`AGENTS.md`); `CLAUDE.md` is not used.
 
-Tasks are coordinated through Xezar (github.com/qodeca/xezar), a local cockpit for agent tasks. The cockpit for this project runs on port 4321 (`http://127.0.0.1:4321`). Agents reach it through the Xezar MCP bridge, registered as the `xezar` MCP server in `opencode.json` (OpenCode), `.pi/mcp.json` (pi), and `.qwen/settings.json` (Qwen). One client owns the project's leader connection at a time. Project configuration and reusable workflows/skills live in `.xezar/`; local task history and worktrees live under `.local/` and are never committed. To wire push notifications to an OpenCode leader, see [docs/xezar-push-connection.md](docs/xezar-push-connection.md).
+Local scratch lives under `.local/` and is never committed.
 
 ## Commands
 
@@ -24,7 +24,7 @@ npm run test:package                    # Pack + install into a temp consumer, a
 npx playwright install chromium         # Required once before first scrape
 
 # Release (see "Release and publishing" below)
-node scripts/release.mjs patch|minor|major   # Prepare: stamp version + open a bump PR
+node scripts/release.mjs patch|minor|major   # Prepare: stamp package.json + lock (the workflow opens the bump PR)
 node scripts/release.mjs existing            # Publish the version committed on main
 node scripts/release.mjs existing --dry-run  # Rehearse the publish without publishing
 ```
@@ -32,9 +32,11 @@ node scripts/release.mjs existing --dry-run  # Rehearse the publish without publ
 ## Release and publishing
 
 revcli publishes to npm as **`@qodeca/revcli`**, only from `main`, only through
-`.github/workflows/release.yml` (`workflow_dispatch`). Runbook: [docs/publishing.md](docs/publishing.md).
+`.github/workflows/release.yml` (`workflow_dispatch`). Runbook: [docs/releasing.md](docs/releasing.md);
+one-time setup: [docs/publishing.md](docs/publishing.md).
 What was learned building it (npm 2FA, registry propagation, Actions gotchas):
-[docs/release-learnings.md](docs/release-learnings.md).
+[docs/release-learnings.md](docs/release-learnings.md). The Qwen Code skill
+`.qwen/skills/release-revcli/` mirrors this section for an agent driving a release.
 
 ### The two-step release (bump-first)
 

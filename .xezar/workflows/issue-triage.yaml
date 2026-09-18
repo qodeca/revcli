@@ -1,8 +1,0 @@
-name: issue-triage
-description: Triage a GitHub issue or request — verify the claim against the code, size it, then recommend implement / simplify / defer / reject and ask. No code changes.
-steps:
-  - id: triage
-    name: Triage, assess and ask
-    prompt: "{{task}}"
-    skill: revcli-issue-triage
-    allowedTools: [Read, Grep, Glob, Bash]
