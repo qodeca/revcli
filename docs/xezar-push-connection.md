@@ -1,6 +1,6 @@
 # Connecting Xezar to OpenCode so push notifications work
 
-This project's agent tasks are coordinated by Xezar, the local cockpit. It runs on port 4444 (`http://127.0.0.1:4444`). Agents reach it through the `xezar` MCP server registered in `opencode.json` (OpenCode) and `.pi/mcp.json` (pi). One client owns the project's leader connection at a time.
+This project's agent tasks are coordinated by Xezar, the local cockpit. It runs on port 4321 (`http://127.0.0.1:4321`). Agents reach it through the `xezar` MCP server registered in `opencode.json` (OpenCode) and `.pi/mcp.json` (pi). One client owns the project's leader connection at a time.
 
 ## How OpenCode connects as leader
 
