@@ -122,7 +122,7 @@ Google automatically translates reviews written in a language other than the UI 
 
 **How the scraper captures the original text:**
 1. During bulk extraction, `extractReviews()` records `isTranslated` (toggle button present) and the raw button text as a language hint, parsed Node-side by `extractOriginalLanguageFromButtonText()`.
-2. `captureOriginalTexts()` is called (in `scroller.ts`) with only not-yet-collected reviews, toggling each to the original, reading the text and `lang`, then restoring the translation. Filtering by collected IDs ensures each review is toggled at most once per scrape.
+2. `captureOriginalTexts()` (defined in `src/scraper/extractor.ts`) is called from `scroller.ts` with only not-yet-collected reviews, toggling each to the original, reading the text and `lang`, then restoring the translation. Filtering by collected IDs ensures each review is toggled at most once per scrape.
 3. `parseReview()` in `parser.ts` then uses the captured `originalText`/`originalLanguage` directly. The old behavior of mirroring `originalText = text` was removed because it produced meaningless data.
 
 **Call-site reference**: `captureOriginalTexts()`, `readOriginalText()`, and `waitForToggleState()` in `src/scraper/extractor.ts`. The pure helper `extractOriginalLanguageFromButtonText()` and the `viewOriginalButton` selector are regression-guarded in `tests/extractor.test.ts` and `tests/extractor-selectors.test.ts`.
