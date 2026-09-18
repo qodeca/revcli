@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- `revcli auth` no longer shuts the browser down as soon as Google Maps renders. It used to exit
+  immediately whenever the profile already held a signed-in session, which made it impossible to
+  sign in or switch accounts. The window now stays open – for credential entry, or for account
+  switching when a session already exists – and closes when sign-in is detected or when you close
+  it. The 5-minute timeout also reports a message instead of an unhandled-rejection stack trace.
+
 ## [0.1.4] - 2026-09-18
 
 ### Changed
