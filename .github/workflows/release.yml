@@ -269,6 +269,23 @@ jobs:
               prerelease: false,
             });
 
+      # The prepare job pushes `release/vX.Y.Z` and nothing else removes it, so one branch
+      # accumulated per release. Delete it once the version it carried is live. (The repo
+      # deliberately does NOT use GitHub's "automatically delete head branches" setting: the
+      # trunk sync is a develop -> main PR, and that setting would delete `develop`.)
+      - name: Delete the version-bump branch
+        if: ${{ !cancelled() && steps.release.outputs.published == 'true' }}
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          REF="repos/${{ github.repository }}/git/refs/heads/release/v${VERSION}"
+          if gh api -X DELETE "$REF" 2>/dev/null; then
+            echo "deleted release/v${VERSION}"
+          else
+            echo "::warning::release/v${VERSION} was already gone or could not be deleted"
+          fi
+
       - name: Write workflow summary
         if: always() && steps.release.outputs.version != ''
         env:
