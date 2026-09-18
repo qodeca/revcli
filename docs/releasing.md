@@ -171,6 +171,31 @@ Then watch it through:
 gh run watch $RUN
 ```
 
+#### The agent gate hook
+
+`.qwen/skills/release-revcli/scripts/gate.sh` is a `PreToolUse` hook that mechanically denies any
+tool call whose raw input matches `pending_deployments` or `unpublish`. It is the backstop behind
+the two hard rules. Its shape matters, because a denied approval looks like a broken release:
+
+**It reads `REVCLI_GATE_APPROVED` from its own environment — inherited from the agent process —
+not from the command it is inspecting.** So neither of these gets through:
+
+```bash
+REVCLI_GATE_APPROVED=1 gh api … /pending_deployments …          # still denied
+export REVCLI_GATE_APPROVED=1; gh api … /pending_deployments …  # still denied
+```
+
+The hook has already run, in a different process, before your shell exists. To let an agent
+approve the gate you must launch it with the variable already in the environment:
+
+```bash
+REVCLI_GATE_APPROVED=1 qwen
+```
+
+Set that only for a session in which you intend to authorise the approval, and only after the
+agent has told you the run id it is about to approve. Approving by hand in the UI needs no flag —
+that is the path of least resistance, and the one to prefer.
+
 > **If the reviewer is unavailable**, the run waits indefinitely. The fix is a **second
 > required reviewer** on the `production` environment — arrange that in advance. Changing the
 > environment's protection rules (see [publishing.md](publishing.md) §3) is a human-only
