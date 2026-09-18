@@ -81,13 +81,19 @@ What happens: the `gate` job checks the ref is `main` and that the newest CI run
 commit on `main` is a completed success; the `prepare` job stamps `package.json` **and
 `package-lock.json`** and opens a `release/vX.Y.Z` PR. **Nothing is published.**
 
-Expected: a run where `Gate` ✅, `Prepare version bump` ✅, `Publish` ⏭ skipped.
+Expected job outcomes: `Gate — main, and green CI for this commit` ✓,
+`Prepare version bump (patch)` ✓, `Publish the version on main` skipped (rendered `-`).
 
 > The bump PR shows **no CI checks** (`gh pr checks <n>` → "no checks reported"). That is
 > expected — the workflow opens it with `GITHUB_TOKEN` and GitHub does not trigger workflows
 > for token-created events. The gate verifies CI on the *merge commit* instead.
 
 ### 2. Merge the bump PR
+
+> **Add the CHANGELOG entry to the bump PR before merging.** `release.mjs` stamps only
+> `package.json` and `package-lock.json` — the changelog is not written automatically. Push a
+> commit to the `release/vX.Y.Z` branch with a `## [X.Y.Z] - <date>` section and update the
+> comparison links, then merge.
 
 ```bash
 gh pr list --state open          # find the chore(release): vX.Y.Z PR
@@ -116,19 +122,31 @@ in_progress".
 gh workflow run release.yml --ref main -f bump=existing
 ```
 
-Expected: `Gate` ✅ → `Publish the version on main` **⏳ waiting** (the environment gate).
+Expected: `Gate — main, and green CI for this commit` ✓ → `Publish the version on main`
+**waiting** (the environment gate).
+
+Get the run id and its link:
+
+```bash
+gh run list --workflow release.yml --limit 1 --json databaseId,url
+```
 
 ### 5. Approving the gate
 
-The run sits at the `production` environment until a reviewer approves. Either:
+> **This approval is a human decision.** An agent must not clear this gate on its own
+> initiative — present the run link and wait. The API call below exists for a human who has
+> asked for it, not as a step to run unattended.
 
-**In the UI** — open the run, click **Review deployments** → **Approve**:
+The run sits at the `production` environment until a reviewer approves. A human either:
+
+**opens the run and clicks Review deployments → Approve:**
 
 ```
 https://github.com/qodeca/revcli/actions/runs/<RUN_ID>
 ```
 
-**Or via the API** (what the UI does underneath):
+**or, having explicitly asked an agent to approve it on their behalf, uses the API** (what the
+UI does underneath):
 
 ```bash
 RUN=<RUN_ID>
@@ -143,6 +161,11 @@ Then watch it through:
 gh run watch $RUN
 ```
 
+> **If the reviewer is unavailable**, the run waits indefinitely. The fix is a **second
+> required reviewer** on the `production` environment — arrange that in advance. Changing the
+> environment's protection rules (see [publishing.md](publishing.md) §3) is a human-only
+> configuration change: never use it to unblock an agent's own release.
+
 ### 6. Verifying a release
 
 ```bash
@@ -152,7 +175,7 @@ V=0.1.4   # the version you released
 curl -s "https://registry.npmjs.org/@qodeca%2Frevcli/$V" | node -e "
   let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const d=JSON.parse(s);
   console.log('version:',d.version,'| license:',d.license,'| files:',d.dist.fileCount);
-  console.log('provenance:',!!(d.dist.attestations&&d.dist.attestations.provenance));})"
+  console.log('provenance:',Boolean(d.dist.attestations&&d.dist.attestations.provenance));})"
 
 # dist-tags (may lag a minute or two after a publish)
 npm view @qodeca/revcli version dist-tags
@@ -209,13 +232,34 @@ tr '\r' '\n' < /tmp/publish.log | grep -a "auth/cli"
 The npm page offers *"do not challenge npm publish, npm trust operations … for the next 5
 minutes"* — tick it when you have several operations to do in a row.
 
-**Alternative:** pass the code directly. `npm_config_otp` works as an environment variable
-(verify with `npm_config_otp=123456 npm config get otp`), but the code must survive the build
-and packaging gates (~20 s) before the publish step:
+**Alternative, for non-publish operations only:** `npm_config_otp` works as an environment
+variable (verify with `npm_config_otp=123456 npm config get otp`). Use it for operations that
+do **not** publish — `npm trust`, `npm dist-tag`, `npm deprecate`, `npm logout`. Read the code
+with `read -s` so it does not land in shell history:
 
 ```bash
-npm_config_otp=<6-digit> node scripts/release.mjs existing --bootstrap
+read -rs OTP && npm_config_otp="$OTP" npm dist-tag add @qodeca/revcli@<good> latest
 ```
+
+> **Never use it to publish.** A publish that asks for an OTP means the pipeline is being
+> bypassed: no CI gate, no `production` approval, no provenance, no tag. If you reach for
+> this mid-release, stop and fix the pipeline instead. The only exception is the documented
+> bootstrap below, which is a local publish by design.
+
+### If the 2FA credential is lost
+
+OIDC publishes keep working — the workflow never needs your security key. Everything that
+*repairs* the package stops working, because npm gates account and dist-tag changes behind
+2FA: `npm trust`, `npm dist-tag add`, `npm deprecate`, `npm logout`.
+
+Set the recovery path up **before** you need it:
+
+- a **second owner** on the `qodeca` npm org, and
+- a **backup security key or passkey** registered on the account (npm also issues recovery
+  codes when you enrol 2FA).
+
+"Disallow bypass 2fa tokens" removes the last non-2FA route to the registry, so the backup key
+is the only way back in.
 
 ---
 
@@ -235,10 +279,13 @@ clean tree, and the version it ships carries **no provenance attestation**. Afte
 1. Bind the trusted publisher (see [publishing.md](publishing.md)) and prove it with a real
    dispatch.
 2. Create the tag and GitHub Release by hand — the bootstrap is a local publish, so neither
-   exists:
+   exists. The sha is the commit you published from (`git rev-parse HEAD` on the clean `main`
+   you ran the bootstrap on):
 
    ```bash
-   gh release create vX.Y.Z --target <released-commit-sha> --title "vX.Y.Z" --notes-file <notes>
+   SHA=$(git rev-parse HEAD)
+   gh release create vX.Y.Z --target "$SHA" --title "vX.Y.Z" --notes-file <notes>
+   git show "vX.Y.Z:package.json" | grep '"version"'   # must equal the published version
    ```
 
 3. Set the package to **"Require two-factor authentication and disallow bypass 2fa tokens"**.
@@ -259,18 +306,18 @@ clean tree, and the version it ships carries **no provenance attestation**. Afte
 | Gate: "No CI run found for … on main" | Commit landed with `[skip ci]`, or via `GITHUB_TOKEN` | Push a new commit and release that one |
 | Publish job never starts, run shows `waiting` | `production` environment approval pending | Approve it — see "Approving the gate" |
 | `npm error 404` at publish | Trusted publisher mismatched or missing "Allow npm publish" | Check owner/repo/**workflow filename**/environment on npmjs.com |
-| `npm error ENEEDAUTH` at publish | A stray `_authToken` made npm skip the OIDC exchange | Confirm `setup-node` has no `registry-url` |
+| `npm error ENEEDAUTH` at publish | No credential for the registry — the OIDC exchange produced no token (`id-token: write` missing, or the exchange failed) | Check the job has `id-token: write`; then confirm `setup-node` has no `registry-url`. A stray or literal-`${NODE_AUTH_TOKEN}` token surfaces as a 401/404 instead |
 | `cannot publish over the previously published versions` | Version already on the registry | Versions are immutable. Prepare the next patch; never re-dispatch |
-| Release published but no tag/Release | A step failed after the publish | Do **not** re-run; `gh release create` by hand at the released commit |
+| Release published but no tag/Release | A step failed after the publish | Do **not** re-run. Take the sha from the publish run (`gh run view <RUN_ID> --json headSha`) and `gh release create vX.Y.Z --target <sha>`; verify `git show vX.Y.Z:package.json \| grep version` equals the published version |
 | `latest` points at the wrong version | — | `npm dist-tag add @qodeca/revcli@<good> latest` |
-| A release run is queued behind another | Concurrency is a depth-1 queue; a third run cancels the pending one | Cancel any running/queued Release run, then re-dispatch |
+| A release run is queued behind another | Concurrency is a depth-1 queue; a third run cancels the pending one | Cancel only **pending/queued** runs, then re-dispatch. Before cancelling a **running** run, check whether it already published (`gh run view <RUN_ID> --json headSha`, or the registry) — the tag step is `!cancelled()`-guarded, so cancelling after the publish strands an untagged version |
 
 ### The registry is eventually consistent
 
 For roughly two minutes after a publish, the **packument** (`GET /@qodeca%2Frevcli`) can 404
 while the **version endpoint** (`/@qodeca%2Frevcli/<version>`) and the **tarball** already
 return 200. `npm install` and `npm view` read the packument, so both fail during the window.
-`release.mjs` polls through it (12 × 10 s) before reporting failure. If you are checking by
+`release.mjs` polls through it (12 checks, 10 s apart — about 110 s) before reporting failure. If you are checking by
 hand, the version endpoint and the tarball are authoritative.
 
 ---
@@ -279,15 +326,17 @@ hand, the version endpoint and the tarball are authoritative.
 
 - **Do not re-dispatch a version that is already published.** Versions are immutable.
 - **Do not `npm unpublish` to retry.** Publish the fix as a new patch.
-- **Do not verify the pipeline by dispatching.** A dispatch publishes. Read
-  `origin/main:.github/workflows/release.yml` and check the CI run instead.
+- **Do not dispatch `bump=existing` to test the pipeline — that mode publishes.**
+  `patch`/`minor`/`major` are safe: they only open a PR. To inspect what is deployed, read
+  `origin/main:.github/workflows/release.yml` and its CI run instead.
 - **Do not add `registry-url` to `setup-node`** in the publish job — it writes an
   `_authToken` and npm then skips the OIDC exchange.
 - **Do not pass `--tag latest`** to `npm publish` — npm's "higher version already published"
   guard only applies when the tag is *default*.
 - **Do not put `${{ }}` in a `run:` block** — pass values through `env:` and quote them.
-- **Do not publish from a laptop.** `release.mjs` refuses without OIDC unless `--bootstrap`
-  is passed, deliberately.
+- **Do not publish from a laptop.** `release.mjs` refuses unless it is running in GitHub
+  Actions or `--bootstrap` is passed. The guard is coarse — inside Actions it proceeds and
+  only fails at the publish step — so it stops a laptop publish, not a misconfigured job.
 - **Do not edit the trusted publisher's workflow filename** without updating npmjs.com — the
   publisher is bound to `release.yml` by name.
 
