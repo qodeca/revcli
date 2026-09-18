@@ -1,0 +1,13 @@
+version: 2
+updates:
+  # Actions are pinned to full commit SHAs (the only immutable form), and Dependabot raises
+  # no security alerts for SHA pins — so it must be given the job of proposing updates. The
+  # `# vX.Y.Z` comment on each pin is what Dependabot uses to identify the target version.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: 'ci'
+    labels:
+      - dependencies

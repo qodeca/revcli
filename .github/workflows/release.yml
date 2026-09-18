@@ -1,0 +1,289 @@
+name: Release
+
+# The ONLY workflow in this repository that publishes to npm. It is `workflow_dispatch`-only
+# and never fires from a push: nothing reaches the registry unless a maintainer asks for it.
+#
+# Two modes, chosen by the `bump` input:
+#   - `existing`            → PUBLISH the version already committed on main.
+#   - patch / minor / major → PREPARE a version-bump PR. Nothing is published.
+# A release is therefore always: prepare the bump PR → merge it → dispatch `existing`. That
+# is what keeps main's manifest, the `vX` tag and the registry in agreement, and what stops
+# `latest` from ever moving backwards.
+#
+# There is NO npm token anywhere in this repository. Publishing authenticates with npm
+# TRUSTED PUBLISHING (OIDC): GitHub mints a short-lived identity token for a job granted
+# `id-token: write`, and npm checks it against the trusted publisher configured on the
+# package — which names this repository AND this workflow file by name. Renaming this file,
+# or copying the publish step into another workflow, breaks the publish rather than silently
+# succeeding from somewhere unexpected. The one-time setup is in docs/publishing.md.
+#
+# A release runs only when the dispatched commit is on `main` AND that commit's newest CI run
+# on `main` concluded success. Both conditions are enforced by the `gate` job, which runs
+# BEFORE the environment approval, so a human is only ever asked to approve a release that
+# already passed.
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: '`existing` publishes the version on main; patch/minor/major open a version-bump PR and publish nothing'
+        required: true
+        default: existing
+        type: choice
+        options:
+          - existing
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # Refuse a non-main dispatch, and refuse a commit whose CI is not green on main. No
+  # environment, so this runs before — and independently of — the human approval.
+  gate:
+    name: Gate — main, and green CI for this commit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+
+    steps:
+      # A job-level `if:` that simply skips reports as a green run with nothing executed.
+      # Fail loudly instead, so a wrong-ref dispatch can never look like a release.
+      - name: Refuse a non-main dispatch
+        if: github.ref != 'refs/heads/main'
+        env:
+          REF: ${{ github.ref }}
+        run: |
+          echo "::error::Releases may only be dispatched from main (got '$REF')."
+          exit 1
+
+      # Requires the NEWEST CI run for this exact commit on `main` to be a completed success.
+      # `head_sha` alone is not branch-scoped, so `branch` and the `head_branch` assertion are
+      # both needed. The `event` filter also accepts a manually dispatched CI run, so a commit
+      # that never produced a push run can still be released.
+      - name: Require the newest CI run for this commit on main to be green
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const sha = context.sha;
+            const runUrl = (r) => `https://github.com/${owner}/${repo}/actions/runs/${r.id}`;
+
+            const { data } = await github.rest.actions.listWorkflowRuns({
+              owner, repo,
+              workflow_id: 'ci.yml',
+              branch: 'main',
+              head_sha: sha,
+              per_page: 50,
+            });
+
+            // Guard against this call resolving repo-scoped, which would ignore `workflow_id`
+            // and silently widen the gate to every push-triggered workflow.
+            const runs = data.workflow_runs
+              .filter((r) => r.path === '.github/workflows/ci.yml' || r.name === 'CI')
+              .filter((r) => r.event === 'push' || r.event === 'workflow_dispatch')
+              .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+            if (runs.length === 0) {
+              core.setFailed(`No CI run found for ${sha} on main. CI must run on main before a release.`);
+              return;
+            }
+
+            const newest = runs[0];
+            if (newest.head_branch !== 'main') {
+              core.setFailed(`Newest CI run for ${sha} is on '${newest.head_branch}', not main: ${runUrl(newest)}`);
+            } else if (newest.status !== 'completed') {
+              core.setFailed(`CI for ${sha} is still ${newest.status}. Re-dispatch once it completes: ${runUrl(newest)}`);
+            } else if (newest.conclusion !== 'success') {
+              core.setFailed(`CI for ${sha} concluded '${newest.conclusion}': ${runUrl(newest)}`);
+            } else {
+              core.notice(`CI is green for ${sha} on main: ${runUrl(newest)}`);
+            }
+
+  # PREPARE — stamp the next version and open a version-bump PR. Nothing is published, so
+  # this job holds no OIDC token and needs no environment approval.
+  prepare:
+    name: Prepare version bump (${{ inputs.bump }})
+    needs: gate
+    if: inputs.bump != 'existing'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: lts/*
+
+      # Never interpolate `${{ }}` into `run:` — pass it through the environment and quote it.
+      - name: Stamp the next version
+        id: prepare
+        env:
+          BUMP: ${{ inputs.bump }}
+        run: |
+          case "$BUMP" in
+            patch|minor|major) ;;
+            *) echo "::error::unexpected bump '$BUMP'"; exit 1 ;;
+          esac
+          node scripts/release.mjs "$BUMP"
+
+      - name: Open the version-bump PR
+        env:
+          VERSION: ${{ steps.prepare.outputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          BRANCH="release/v${VERSION}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add package.json package-lock.json
+          git commit -m "chore(release): v${VERSION}"
+          git push origin "$BRANCH"
+          gh pr create --base main --head "$BRANCH" \
+            --title "chore(release): v${VERSION}" \
+            --body "Stamp \`v${VERSION}\` on main. Merge this, then dispatch the Release workflow with bump=\`existing\` to publish it."
+
+      - name: Write workflow summary
+        if: always() && steps.prepare.outputs.version != ''
+        env:
+          VERSION: ${{ steps.prepare.outputs.version }}
+        run: |
+          {
+            echo "## Prepared v${VERSION}"
+            echo ""
+            echo "Nothing was published. Merge the version-bump PR, then dispatch this workflow with \`bump=existing\`."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # PUBLISH — build, verify and publish the version already committed on main.
+  publish:
+    name: Publish the version on main
+    needs: gate
+    if: inputs.bump == 'existing'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Gate the publish behind a required-reviewer approval. If the environment is not
+    # configured yet, GitHub creates it on first use WITHOUT reviewers (non-blocking); add
+    # reviewers at Settings → Environments → production before the first release.
+    environment: production
+    permissions:
+      contents: write # create the release tag + GitHub Release via the API
+      id-token: write # mint the OIDC token npm trusted publishing authenticates with
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false # the tag/Release are created via the API, not git push
+
+      # No `registry-url`: it writes an _authToken into the npm userconfig, and npm then
+      # believes auth is configured and skips the OIDC exchange (ENEEDAUTH, or a 404 that
+      # reads like a missing package). The default registry already applies.
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: lts/*
+
+      # Trusted publishing needs npm >= 11.5.1 (and Node >= 22.14.0). A Node-22.14 runner
+      # satisfies the Node floor while shipping npm 10.x, so the npm floor is asserted here.
+      - name: Check the npm version (trusted publishing needs >= 11.5.1)
+        run: |
+          export NPM_VERSION=$(npm --version)
+          echo "npm $NPM_VERSION"
+          node -e 'const [a,b,c]=process.env.NPM_VERSION.split(".").map(Number); if(!(a>11||(a===11&&(b>5||(b===5&&c>=1))))){console.error("::error::npm "+process.env.NPM_VERSION+" is too old for trusted publishing (need >= 11.5.1)");process.exit(1)}'
+
+      # `--ignore-scripts` keeps dependency lifecycle scripts from running in the job that
+      # holds `id-token: write`, so a poisoned transitive dependency cannot publish as the
+      # trusted publisher. The build and both packaging gates run in the next step.
+      - name: Install dependencies (no lifecycle scripts)
+        run: npm ci --ignore-scripts
+
+      # `scripts/release.mjs existing` refuses a version the registry already holds or one that
+      # would move `latest` backwards, builds, runs check:pack and test:package, publishes
+      # WITHOUT `--tag latest` (so npm's own default-tag guard stays armed), and verifies
+      # `latest` afterwards. It FAILS when it has no credential — it never degrades to a dry
+      # run, so a green job here means the package really shipped.
+      - name: Publish release
+        id: release
+        env:
+          BUMP: ${{ inputs.bump }}
+        run: |
+          case "$BUMP" in
+            existing) ;;
+            *) echo "::error::unexpected bump '$BUMP'"; exit 1 ;;
+          esac
+          node scripts/release.mjs "$BUMP"
+
+      # `!cancelled()` (not `always()`) so the tag is still created if an earlier step failed
+      # but the publish itself succeeded — a published version with no tag is the one state that
+      # must not happen silently. The tag points at the exact commit the tarball was built from,
+      # so the release source and the npm artifact agree on the revision.
+      - name: Create GitHub Release
+        if: ${{ !cancelled() && steps.release.outputs.published == 'true' }}
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        with:
+          script: |
+            const version = process.env.VERSION;
+            const body = [
+              '## Published package',
+              '',
+              '| Package | Version | Dist-tag |',
+              '|---|---|---|',
+              '| `@qodeca/revcli` | `' + version + '` | `latest` |',
+              '',
+              '### Install',
+              '',
+              '```bash',
+              'npm install -g @qodeca/revcli@' + version,
+              'npx playwright install chromium',
+              'revcli --version',
+              '```',
+              '',
+              'Built from `' + context.sha + '`.',
+            ].join('\n');
+            await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: 'v' + version,
+              target_commitish: context.sha,
+              name: 'v' + version,
+              body,
+              draft: false,
+              prerelease: false,
+            });
+
+      - name: Write workflow summary
+        if: always() && steps.release.outputs.version != ''
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+          PUBLISHED: ${{ steps.release.outputs.published }}
+        run: |
+          {
+            echo "## Release ${VERSION}"
+            echo ""
+            if [ "$PUBLISHED" = "true" ]; then
+              echo "Published \`@qodeca/revcli@${VERSION}\` to \`latest\` and tagged \`v${VERSION}\`."
+              echo ""
+              echo '```bash'
+              echo "npm install -g @qodeca/revcli@${VERSION}"
+              echo '```'
+            else
+              echo "Nothing was published — this run did not perform a real release."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

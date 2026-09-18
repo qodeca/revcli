@@ -22,6 +22,10 @@ export const ReviewSchema = z.object({
   rating: z.number().int().min(0).max(5),
   text: z.string().nullable(),
   originalText: z.string().nullable(),
+  // Canonical form: the human-readable language name Google labels the source
+  // text with (e.g. "Polish", "German"), or null when the review was already
+  // written in the UI locale (hl=en) so no "See original" toggle exists. This
+  // is NOT an ISO 639-1/2 code; consumers should not assume a short code.
   originalLanguage: z.string().nullable(),
   photos: z.number().int().min(0),
   ownerResponse: OwnerResponseSchema.nullable(),

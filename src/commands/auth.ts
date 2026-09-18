@@ -7,7 +7,11 @@ import {
   trackBrowser,
   PROFILE_DIR,
 } from "../scraper/browser.js";
-import { isSignedIn, hasLimitedView } from "../scraper/auth.js";
+import {
+  isSignedIn,
+  hasLimitedView,
+  waitForSignIn,
+} from "../scraper/auth.js";
 import { handleConsent } from "../scraper/consent.js";
 
 export async function authLoginCommand(): Promise<void> {
@@ -42,45 +46,8 @@ export async function authLoginCommand(): Promise<void> {
 
     logger.info("Waiting for sign-in... (timeout: 5 minutes)");
 
-    const maxWaitMs = 300000;
-    const pollIntervalMs = 3000;
-    const startTime = Date.now();
-
-    while (Date.now() - startTime < maxWaitMs) {
-      await page.waitForTimeout(pollIntervalMs);
-      const url = page.url();
-
-      if (url.includes("google.com/maps")) {
-        if (await isSignedIn(page)) {
-          logger.success("Signed in to Google Maps. Session saved.");
-          return;
-        }
-      } else if (
-        url.includes("myaccount.google.com") ||
-        (url.includes("google.com") &&
-          !url.includes("accounts.google.com/signin") &&
-          !url.includes("accounts.google.com/v3/signin") &&
-          !url.includes("accounts.google.com/o/oauth") &&
-          !url.includes("accounts.google.com/ServiceLogin"))
-      ) {
-        // User completed sign-in on another Google page – go back to Maps
-        await page.goto("https://www.google.com/maps?hl=en", {
-          waitUntil: "domcontentloaded",
-          timeout: 30000,
-        });
-        await handleConsent(page);
-        await page.waitForTimeout(3000);
-
-        if (await isSignedIn(page)) {
-          logger.success("Signed in to Google Maps. Session saved.");
-          return;
-        }
-      }
-    }
-
-    throw new Error(
-      "Timed out waiting for Google sign-in (5 minutes). Please try again.",
-    );
+    await waitForSignIn(context, page);
+    logger.success("Signed in to Google Maps. Session saved.");
   } finally {
     await closeBrowser(context);
   }

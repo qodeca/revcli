@@ -1,6 +1,6 @@
 # revcli
 
-![Node](https://img.shields.io/badge/node-%3E%3D22-brightgreen) ![TypeScript](https://img.shields.io/badge/TypeScript-5.8-blue) ![Playwright](https://img.shields.io/badge/Playwright-1.52-green) ![License](https://img.shields.io/badge/license-MIT-blue)
+![Node](https://img.shields.io/badge/node-%3E%3D22-brightgreen) ![npm](https://img.shields.io/npm/v/@qodeca/revcli) ![GitHub release](https://img.shields.io/github/v/release/qodeca/revcli) ![License](https://img.shields.io/badge/license-MIT-blue)
 
 A command-line tool that scrapes Google Maps location reviews using browser automation. No API key required.
 
@@ -24,6 +24,7 @@ A command-line tool that scrapes Google Maps location reviews using browser auto
 - [Troubleshooting](#troubleshooting)
 - [Limitations](#limitations)
 - [Maintenance](#maintenance)
+- [Development](#development)
 - [Contributing](#contributing)
 - [Reporting a bug](#reporting-a-bug)
 - [Legal notice](#legal-notice)
@@ -44,24 +45,18 @@ A command-line tool that scrapes Google Maps location reviews using browser auto
 ## Prerequisites
 
 - **Node.js 22+**
-- **Chromium** (downloaded automatically via Playwright)
+- **Chromium** (install once with `npx playwright install chromium` — it is **not** downloaded automatically)
 
 ## Installation
 
-> **Not yet published on npm.** Install from source:
-
 ```bash
-git clone https://github.com/qodeca/revcli.git
-cd revcli
-npm install
-npm run build
-npx playwright install chromium
-npm link              # optional: exposes `revcli` as a global command
+npm install -g @qodeca/revcli
+npx playwright install chromium   # required once — browsers are NOT auto-downloaded
 ```
 
-After `npm link`, the `revcli` binary is available system-wide. Without linking, use `npm run dev -- scrape '<url>'` from the project directory.
+The `revcli` binary is available system-wide after the global install. The first run needs the Chromium binary (~165 MB); install it once with the command above.
 
-> **Note:** The first install requires `npx playwright install chromium` to download the browser binary (~165 MB).
+To build and run from source, see [Development](#development).
 
 ## Quick start
 
@@ -206,7 +201,7 @@ revcli auth status         # Check auth state
 revcli auth logout         # Clear session
 ```
 
-**How it works:** revcli uses a persistent Chrome profile at `~/.revcli/chrome-profile/`. Sign in once with `revcli auth`, and all subsequent scrapes reuse that session. Google auth cookies persist between CLI runs.
+**How it works:** revcli uses a persistent Chrome profile at `~/.revcli/chrome-profile/`. Sign in once with `revcli auth`, and all subsequent scrapes reuse that session. Google auth cookies persist between CLI runs. The profile is a **credential store** holding your Google session cookies — it is created with owner-only (`0700`) permissions. Do not share it or back it up; anyone with read access to it can act as your signed-in session.
 
 ## Output schema
 
@@ -260,15 +255,17 @@ revcli auth logout         # Clear session
 
 </details>
 
-### Output schema changes
+### Business field consistency
 
-**`business.totalReviews` now reflects the collected review count, not Google's header value.**
+The output is internally consistent:
 
-Previously, `business.totalReviews` was populated from the Google Maps business listing header at the start of the scrape (e.g., `"568 reviews"`). As of this release it equals `reviews.length` in the same file, so the metadata is internally consistent with the payload.
+- `business.totalReviews` always equals `reviews.length` in the same file.
+- `business.headerTotalReviews` preserves Google's header-reported review count, or `null`
+  when it could not be parsed. It may differ from `totalReviews` when Google under-reports,
+  when `--max-reviews` caps collection, or when the header parser cannot read the value.
 
-The original Google-reported header value is preserved in a new field, `business.headerTotalReviews`. It is nullable (`null` when parsing failed). Old JSON files written by previous revcli versions still load via `revcli validate` – the missing field defaults to `null`.
-
-Note: when you pass `--max-reviews N`, `totalReviews === N` (the capped collected count), and `headerTotalReviews` holds Google's larger number.
+When you pass `--max-reviews N`, `totalReviews === N` (the capped collected count) and
+`headerTotalReviews` holds Google's larger number.
 
 ## How it works
 
@@ -291,7 +288,7 @@ No Google API key is needed – the tool reads the same public page a regular br
 |---|---|---|
 | "Limited view" appears instead of the Reviews tab | Google's EEA auth wall for unauthenticated users | Run `revcli auth` once to sign in; the persistent profile remembers you |
 | URL in command gets mangled, `!` characters rewritten | zsh/bash history expansion on `!` | Always wrap URLs in **single quotes** (`'...'`), never double quotes |
-| Scraper returns 0 reviews with no errors | Selectors may be stale – Google rotates obfuscated classes | Run with `--verbose` and see [docs/selector-maintenance.md](docs/selector-maintenance.md) to update selectors |
+| Scraper returns 0 reviews with no errors | Selectors may be stale – Google rotates obfuscated classes | Run with `--verbose` and see [docs/selector-maintenance.md](https://github.com/qodeca/revcli/blob/main/docs/selector-maintenance.md) to update selectors |
 | Warning: "N reviews have rating=0 – stars selector may be stale" | The stars selector went stale; reviews still collected, just without star ratings | Update `SELECTORS.stars` in `src/scraper/selectors.ts` |
 | Scraper hangs or times out mid-scroll | Rate limiting or anti-bot throttling | Increase `--delay` (default 3000 ms); for batches, increase `--location-delay` (default 10000 ms) |
 | `business.headerTotalReviews` is `null` in the output | Header parser couldn't read the count; `business.totalReviews` still equals `reviews.length` | Cosmetic – the scrape itself succeeded |
@@ -304,34 +301,40 @@ Run any command with `-v, --verbose` for debug-level logs including selector par
 
 - **Selector fragility** – Google Maps uses obfuscated CSS class names that change periodically. When this happens, the scraper returns zero reviews. All selectors are centralized in `src/scraper/selectors.ts` for easy updating.
 - **Relative timestamps** – Google Maps shows review times as "2 weeks ago" rather than exact dates. These are captured as-is.
-- **No translation toggle** – The tool captures whatever text Google displays (usually auto-translated). The original language text requires clicking "See original" which is not currently automated.
-- **Language detection** – The `originalLanguage` field uses a simple Arabic/Latin script heuristic, not full language identification.
+- **Original-language capture is best-effort** – for translated reviews revcli clicks "See original" to capture `originalText`/`originalLanguage`, then restores the translation. If a card cannot be restored it is re-toggled on the next cycle; if the original text fails to render the capture is skipped rather than recorded as the translation. Reviews written in the UI locale (`hl=en`) have `originalText`/`originalLanguage` as `null` (no toggle exists).
+- **Language detection** – the `originalLanguage` field is the human-readable name Google labels the source text with (e.g. "Polish"), or `null` when no "See original" toggle exists. It is not an ISO 639 code.
 - **`newest` sort filtering** – Google Maps applies hidden recency/verification filters when sorting by newest. The collected review count can plateau below the header-reported total (this is Google-side behaviour, not a scraper bug).
 
 ## Maintenance
 
-Google rotates the obfuscated CSS class names every few weeks to months. When that happens, the scraper silently returns zero reviews. All selectors live in **`src/scraper/selectors.ts`** – update them in one place. The full update procedure, diagnosis steps, and list of stable vs fragile patterns is in [**docs/selector-maintenance.md**](docs/selector-maintenance.md). Read the "Expand button lesson" section there before touching `SELECTORS.expandButton` – it documents a three-revision debugging story that's easy to accidentally undo.
+Google rotates the obfuscated CSS class names every few weeks to months. When that happens, the scraper silently returns zero reviews. All selectors live in **`src/scraper/selectors.ts`** – update them in one place. The full update procedure, diagnosis steps, and list of stable vs fragile patterns is in [**docs/selector-maintenance.md**](https://github.com/qodeca/revcli/blob/main/docs/selector-maintenance.md). Read the "Expand button lesson" section there before touching `SELECTORS.expandButton` – it documents a three-revision debugging story that's easy to accidentally undo.
 
-## Contributing
+## Development
+
+To build and run revcli from source:
 
 ```bash
 git clone https://github.com/qodeca/revcli.git
 cd revcli
 npm install
+npm run build
 npx playwright install chromium
+npm link              # optional: exposes `revcli` as a global command
 ```
 
-### Development workflow
+After `npm link`, the `revcli` binary is available system-wide. Without linking, use `npm run dev -- scrape '<url>'` from the project directory.
 
 ```bash
 npm run dev -- scrape 'https://maps.app.goo.gl/...' -m 5    # Run from source
-npm test                                                      # Run all tests (238)
+npm test                                                      # Run all tests
 npx vitest run tests/parser.test.ts                           # Run single test file
 npm run typecheck                                             # Type check
 npm run build                                                 # Build to dist/
 ```
 
-Architecture, data-flow patterns, and coding conventions are documented in [CLAUDE.md](CLAUDE.md). Read it before making structural changes – it captures hard-won lessons (Playwright locator scoping, typed unrecoverable errors, `hl=en` invariant, etc.) that aren't obvious from the source.
+## Contributing
+
+Architecture, data-flow patterns, and coding conventions are documented in [AGENTS.md](https://github.com/qodeca/revcli/blob/main/AGENTS.md). Read it before making structural changes – it captures hard-won lessons (Playwright locator scoping, typed unrecoverable errors, `hl=en` invariant, etc.) that aren't obvious from the source.
 
 ### Project structure
 
@@ -351,7 +354,7 @@ src/
 └── utils/          # URL parser, logger, batch progress
 ```
 
-See [CLAUDE.md](CLAUDE.md) for architecture details and coding conventions.
+See [AGENTS.md](https://github.com/qodeca/revcli/blob/main/AGENTS.md) for architecture details and coding conventions.
 
 ## Reporting a bug
 
@@ -364,7 +367,7 @@ Before opening an issue, please include the following so maintainers can reprodu
 5. **A Google Maps place URL that reproduces the issue**, if possible – selectors sometimes behave differently on different place types (restaurants, hotels, gyms, etc.)
 
 Known classes of issues and where to look:
-- **Zero reviews returned** or `rating=0` warnings → Google rotated a selector. See [docs/selector-maintenance.md](docs/selector-maintenance.md).
+- **Zero reviews returned** or `rating=0` warnings → Google rotated a selector. See [docs/selector-maintenance.md](https://github.com/qodeca/revcli/blob/main/docs/selector-maintenance.md).
 - **`UnrecoverableError` with `NAV_VERIFY`** → cross-contamination guard tripped; the scraper intentionally bails rather than return stale data. Open an issue with the verbose log.
 - **`captcha detected`** → you're being throttled. Not a bug, but an issue helps track frequency.
 
@@ -377,6 +380,8 @@ This tool automates a web browser to access publicly available information on Go
 - Use reasonable delays between requests to avoid excessive load on Google's servers
 - This tool is not affiliated with, endorsed by, or connected to Google in any way
 
+> **Anti-automation note:** to work around Google's EEA "limited view" and to read the same page a human browser sees, revcli presents itself as a regular browser session — it uses a persistent Chrome profile, a user-agent string matching a real Chrome build, and a script that masks the `navigator.webdriver` flag. This impersonation is ToS-sensitive: Google may rate-limit or block accounts/IPs that appear to be automating Maps. Use it sparingly, keep delays generous, and only on data you have the right to collect. Removing the evasion would break unauthenticated scraping, which is why it is documented rather than disabled.
+
 ## License
 
-[MIT](LICENSE)
+[MIT](https://github.com/qodeca/revcli/blob/main/LICENSE)

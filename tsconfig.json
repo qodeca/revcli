@@ -12,6 +12,6 @@
     "resolveJsonModule": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["src"],
+  "include": ["src", ".pi/extensions"],
   "exclude": ["node_modules", "dist", "tests", "fixtures"]
 }

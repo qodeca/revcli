@@ -23,6 +23,15 @@ const SORT_OPTIONS: Record<SortOrder, number> = {
 
 const GOOGLE_MAPS_ORIGIN = "https://www.google.com";
 
+// Named timeout literals so the wait strategy is auditable in one place.
+const PAGE_LOAD_TIMEOUT_MS = 30000;
+const REVIEW_PANEL_TIMEOUT_MS = 15000;
+const SHORT_SETTLE_MS = 1000;
+const SCROLL_SETTLE_MS = 1500;
+const SORT_CLICK_TIMEOUT_MS = 5000;
+const SORT_MENU_TIMEOUT_MS = 3000;
+const SORT_ANNOUNCE_TIMEOUT_MS = 5000;
+
 async function acceptDialog(dialog: Dialog): Promise<void> {
   await dialog.accept();
 }
@@ -46,9 +55,13 @@ export async function navigateToReviews(
   // intact. See issue #4.
   await clearVolatileBrowserState(page, GOOGLE_MAPS_ORIGIN);
 
-  const waitUntil = parsed.isShortUrl ? "networkidle" : "domcontentloaded";
+  // Google Maps' SPA keeps polling, so `networkidle` is never reached and a
+  // short URL (redirected via HTTP 3xx) times out after 30s. `domcontentloaded`
+  // resolves once the redirect target's DOM is loaded; the `waitForSelector`
+  // below confirms the place panel is actually present.
+  const waitUntil = "domcontentloaded";
   logger.debug(`Navigating to ${targetUrl}`);
-  await page.goto(targetUrl, { waitUntil, timeout: 30000 });
+  await page.goto(targetUrl, { waitUntil, timeout: PAGE_LOAD_TIMEOUT_MS });
 
   // Handle Google consent page
   await handleConsent(page);
@@ -57,7 +70,7 @@ export async function navigateToReviews(
   await ensureEnglishLocale(page);
 
   // Wait for the place panel to load
-  await page.waitForSelector("h1", { timeout: 15000 });
+  await page.waitForSelector("h1", { timeout: REVIEW_PANEL_TIMEOUT_MS });
 
   // Extract placeId from the resolved URL (useful for short URLs)
   const resolvedUrl = page.url();
@@ -104,9 +117,35 @@ export async function navigateToReviews(
   return businessInfo;
 }
 
+/**
+ * Google Maps virtualizes the review list: after the Reviews tab is clicked it
+ * renders only the summary and filter chips and defers the first batch of
+ * review cards until a real mouse-wheel scroll fires on the scroll container.
+ * Nudge the container once so `reviewCard` nodes exist before we wait on them,
+ * otherwise openReviewsTab blocks until its 15s waitForSelector times out.
+ */
+async function scrollReviewsIntoView(page: Page): Promise<void> {
+  const containerSel = await page.evaluate((candidates) => {
+    for (const sel of candidates) {
+      const el = document.querySelector(sel);
+      if (el && el.scrollHeight > el.clientHeight) return sel;
+    }
+    return null;
+  }, SELECTORS.scrollContainers);
+
+  if (!containerSel) return;
+
+  const box = await page.locator(containerSel).first().boundingBox();
+  if (!box) return;
+
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.wheel(0, 800);
+  await page.waitForTimeout(SCROLL_SETTLE_MS);
+}
+
 async function openReviewsTab(page: Page): Promise<void> {
   await page.waitForSelector(SELECTORS.tab, { timeout: 10000 });
-  await page.waitForTimeout(1000);
+  await page.waitForTimeout(SHORT_SETTLE_MS);
 
   // Check for limited view before attempting to find Reviews tab
   if (await hasLimitedView(page)) {
@@ -130,10 +169,11 @@ async function openReviewsTab(page: Page): Promise<void> {
   }
 
   if (!clicked) {
-    // Fallback for non-English locale remnants
-    const reviewsTab = page.locator(
-      'button:has-text("Reviews"), button:has-text("Opinie"), button:has-text("Bewertungen")',
-    );
+    // Fallback for non-English locale remnants. Scope to `[role="tab"]` so the
+    // `:has-text` substring cannot match review-card text or reviewer names.
+    const reviewsTab = page.locator(SELECTORS.tab).filter({
+      hasText: /review|opinie|bewertungen/i,
+    });
     try {
       await reviewsTab.first().click({ timeout: 5000 });
     } catch {
@@ -143,8 +183,12 @@ async function openReviewsTab(page: Page): Promise<void> {
     }
   }
 
-  await page.waitForSelector(SELECTORS.reviewCard, { timeout: 15000 });
-  await page.waitForTimeout(1000);
+  // The review list is virtualized – the first batch of cards only renders
+  // after a real scroll event, so nudge the container before waiting.
+  await scrollReviewsIntoView(page);
+
+  await page.waitForSelector(SELECTORS.reviewCard, { timeout: REVIEW_PANEL_TIMEOUT_MS });
+  await page.waitForTimeout(SHORT_SETTLE_MS);
   logger.debug("Reviews panel loaded");
 }
 
@@ -163,21 +207,22 @@ export async function setSortOrder(page: Page, sortOrder: SortOrder): Promise<vo
   }
 
   const sortButton = page.locator(SELECTORS.sortButton);
-  await sortButton.first().click({ timeout: 5000 });
+  await sortButton.first().click({ timeout: SORT_CLICK_TIMEOUT_MS });
 
-  await page.waitForSelector(SELECTORS.sortMenuItem, { timeout: 3000 });
+  await page.waitForSelector(SELECTORS.sortMenuItem, { timeout: SORT_MENU_TIMEOUT_MS });
 
   const menuItems = page.locator(SELECTORS.sortMenuItem);
   const count = await menuItems.count();
   if (sortIndex >= count) {
-    throw new Error(
+    throw new UnrecoverableError(
+      "SORT_VERIFY",
       `Sort verification failed: sort menu has ${count} items but "${sortOrder}" requires index ${sortIndex}`,
     );
   }
   await menuItems.nth(sortIndex).click();
 
   // Wait for the sort menu to close
-  await page.waitForSelector(SELECTORS.sortMenuItem, { state: "hidden", timeout: 3000 }).catch(() => {});
+  await page.waitForSelector(SELECTORS.sortMenuItem, { state: "hidden", timeout: SORT_MENU_TIMEOUT_MS }).catch(() => {});
 
   const expectedKeyword = SORT_VERIFY_TEXT[sortOrder];
 
@@ -191,18 +236,19 @@ export async function setSortOrder(page: Page, sortOrder: SortOrder): Promise<vo
         return (liveRegion.textContent ?? "").trim().toLowerCase().includes(keyword);
       },
       { sel: SELECTORS.sortLiveRegion, keyword: expectedKeyword },
-      { timeout: 5000 },
+      { timeout: SORT_ANNOUNCE_TIMEOUT_MS },
     );
   } catch {
-    // Matched by isUnrecoverable() in retry.ts
-    throw new Error(
+    // Thrown as a typed UnrecoverableError so withRetry does not mask it.
+    throw new UnrecoverableError(
+      "SORT_VERIFY",
       `Sort verification failed: expected "${sortOrder}" but no ARIA announcement found containing "${expectedKeyword}"`,
     );
   }
 
   // Wait for reviews to reload after sort change
   await page.waitForSelector(SELECTORS.reviewCard, { timeout: 10000 });
-  await page.waitForTimeout(1000);
+  await page.waitForTimeout(SHORT_SETTLE_MS);
 
   logger.debug(`Sort order verified: ${sortOrder}`);
 }

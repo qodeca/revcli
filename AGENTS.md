@@ -1,6 +1,12 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for coding agents working in this repository.
+
+## Agent tooling
+
+This project is managed only by open-source agent clients — OpenCode, pi, and Qwen — running local models attached to those clients. There is no Claude Code or Codex setup here, and none should be introduced. Project guidance lives in this file (`AGENTS.md`); `CLAUDE.md` is not used.
+
+Tasks are coordinated through Xezar (github.com/qodeca/xezar), a local cockpit for agent tasks. The cockpit for this project runs on port 4321 (`http://127.0.0.1:4321`). Agents reach it through the Xezar MCP bridge, registered as the `xezar` MCP server in `opencode.json` (OpenCode), `.pi/mcp.json` (pi), and `.qwen/settings.json` (Qwen). One client owns the project's leader connection at a time. Project configuration and reusable workflows/skills live in `.xezar/`; local task history and worktrees live under `.local/` and are never committed. To wire push notifications to an OpenCode leader, see [docs/xezar-push-connection.md](docs/xezar-push-connection.md).
 
 ## Commands
 
@@ -31,12 +37,12 @@ CLI (src/index.ts)  ─── commander routes to 4 commands:
 src/scraper/scrape-location.ts  ── shared orchestrator, accepts ParsedUrl (used by both commands); delegates final payload construction to exported pure helper `assembleScrapeResult()` which reconciles `business.totalReviews` with `reviews.length`
 │
 ├── browser.ts              ── persistent Chromium context (~/.revcli/chrome-profile/), anti-detection, SIGINT cleanup
-├── auth.ts                 ── isSignedIn(), hasLimitedView(), waitForUserAuth() – Google auth detection
+├── auth.ts                 ── isSignedIn(), hasLimitedView(), waitForUserAuth(), waitForSignIn() – Google auth detection; decideSignedIn()/GOOGLE_AUTH_COOKIES make the cookie check authoritative
 ├── navigator.ts            ── orchestrates state eviction → consent → locale → limited-view check → tab → sort; verifies loaded placeId against parsed.placeId
 ├── consent.ts              ── Google consent handling, hl=en enforcement, g_ep/entry stripping
 ├── business-extractor.ts   ── business name/rating/totalReviews/address extraction; page.evaluate() returns raw DOM strings only, parsing happens Node-side via parseReviewCount + parseRatingText; PII-scrubbed debug logging of candidate strings
 ├── scroller.ts             ── mouse wheel scrolling, deduplication by review ID, exponential backoff stale-scroll detection, loading spinner awareness
-├── extractor.ts            ── single page.evaluate() for bulk DOM extraction, staleness warnings
+├── extractor.ts            ── single page.evaluate() for bulk DOM extraction, original-language capture (captureOriginalTexts), staleness warnings
 ├── parser.ts               ── RawReview → validated Review via Zod, language detection
 ├── selectors.ts            ── ALL Google Maps CSS selectors in one place (fragile, version-dated)
 └── storage-types.ts        ── pure VOLATILE_STORAGE_TYPES constant (CDP storage tokens cleared before each scrape; cookies excluded)
@@ -64,8 +70,9 @@ URL input → `parseGoogleMapsInput()` validates → `scrapeLocation(parsed)` la
 
 ### Patterns to know
 
-- **Persistent browser profile**: `launchBrowser()` uses `chromium.launchPersistentContext()` with `~/.revcli/chrome-profile/`. Google auth cookies survive between CLI runs. The `PROFILE_DIR` constant is exported from `browser.ts`.
+- **Persistent browser profile**: `launchBrowser()` uses `chromium.launchPersistentContext()` with `~/.revcli/chrome-profile/`. Google auth cookies survive between CLI runs. The `PROFILE_DIR` constant is exported from `browser.ts`. `ensureProfileDir()` in `browser.ts` creates the directory with owner-only `0700` permissions – it is a **credential store** holding your Google session cookies, so it must never be shared, backed up, or committed. The profile's spoofed user-agent and `navigator.webdriver` masking are ToS-sensitive (see the anti-automation note in README's Legal notice); removing them would break unauthenticated scraping.
 - **Authentication flow**: Google Maps shows a "limited view" (no Reviews tab) to unauthenticated EEA users. `revcli auth` opens a browser for manual sign-in. The scrape command also detects limited view inline and can prompt for auth in headed mode.
+- **Cookie-authoritative sign-in detection**: `auth.ts` defines `GOOGLE_AUTH_COOKIES` (the definitive set of Google session cookies: SID/HSID/SSID/APISID/SAPISID/`__Secure-*PSID`). `decideSignedIn(cookieCheckSucceeded, hasAuthCookies, signInButtonVisible)` treats a successful cookie check as authoritative – when `cookieCheckSucceeded` is true, `hasAuthCookies` decides, and the DOM "Sign in" button is only a fallback when the cookie check failed. `hasGoogleAuthSession()` checks the cookie set directly; `waitForSignIn()` polls and throws a typed `UnrecoverableError` with kind `"AUTH_POLL"` on timeout.
 - **Default headed mode**: The browser shows by default so users can observe scraping. Use `--headless` to hide it. This is the opposite of most scrapers – it's intentional because auth requires a visible browser.
 - **URL normalization**: `appendHlParam()` in `consent.ts` always forces `hl=en` and strips `g_ep`/`entry` tracking params that trigger Google's limited view. This runs before every navigation.
 - **Centralized selectors**: All Google Maps CSS class selectors live in `src/scraper/selectors.ts`. Google obfuscates these names and changes them periodically. When scraping breaks, check selectors first. See [docs/selector-maintenance.md](docs/selector-maintenance.md) for the full update procedure.
@@ -88,6 +95,7 @@ URL input → `parseGoogleMapsInput()` validates → `scrapeLocation(parsed)` la
 - **Business header debug logging**: `business-extractor.ts` emits PII-scrubbed debug-level logs of raw DOM candidate strings (tab text, aria-label badge, scoped `[role="main"]` body snippet) so selector staleness can be diagnosed from `--verbose` output without leaking reviewer names or review content. The scrub preserves digits, separators, K/M/B suffixes, and the letters of "reviews"; all other characters become `·`.
 - **Playwright locator scoping for comma-lists**: Never flat-concatenate selector constants like `` `${SELECTORS.reviewCard} ${SELECTORS.expandButton}` `` – CSS parses the comma as a selector-list union, leaving the second alternative unscoped and matching page-wide. Use chained locators: `page.locator(SELECTORS.reviewCard).locator(SELECTORS.expandButton)`. Chaining scopes both alternatives to the parent's subtree. `expandAllReviews()` in `extractor.ts` is the reference implementation. `tests/extractor-selectors.test.ts` pins the regression shape.
 - **Prefer `jsaction` over `:has-text()` for selector fallbacks**: Playwright's `:has-text("X")` is a case-insensitive substring match over descendant text content. Reviewer names containing "more" (e.g. "KHALID ALMORET" → "AL·MORE·T") made author buttons match the old `expandButton` fallback, causing Local Guide tab pollution and scroll-state drift at ~790 reviews. `SELECTORS.expandButton` now uses `button[jsaction*="review.expand"]` instead. Google's `jsaction` routes are semantic (e.g. `review.expandReview`, `review.expandOwnerResponse`, `review.reviewerLink`) and cannot collide with reviewer data.
+- **Translated-review original text is captured by toggling**: A review Google translated renders a toggle button (`button[jsaction*="review.showReview"]`, `SELECTORS.viewOriginalButton`). The original-language text is NOT pre-rendered in the DOM – it only appears after clicking the toggle (which flips `aria-checked` and swaps `div.MyEned[lang]` / `span.wiI7pd` to the original). `extractReviews()` records `isTranslated` + a button-text language hint (parsed by `extractOriginalLanguageFromButtonText()`); `captureOriginalTexts()` (defined in `extractor.ts`, called from `scroller.ts`) then toggles each not-yet-collected review, reads the original, and restores. `parseReview()` uses the captured `originalText`/`originalLanguage` directly and does NOT mirror `text` (the old misleading behavior). See docs/selector-maintenance.md §5b.
 - **Version auto-sync from package.json**: `src/index.ts` reads the CLI version via `import pkg from "../package.json" with { type: "json" }` and passes `pkg.version` to Commander. Requires `rootDir` to be absent from `tsconfig.json` (package.json sits outside `src/`). Bumping `package.json` alone propagates to `revcli --version` on the next build.
 
 ## Conventions
@@ -95,7 +103,7 @@ URL input → `parseGoogleMapsInput()` validates → `scrapeLocation(parsed)` la
 - ESM-only (`"type": "module"`, `.js` extensions in imports)
 - Node 22+ required
 - Strict TypeScript, zero `any` types
-- Tests use vitest (238 tests across 15 files) – pure-function tests for parser, schema, URL, CSV, JSON, retry, rate-limiter, consent, unrecoverable, batch-utils, validate, scroller, storage-types, scrape-location, extractor-selectors; Playwright-dependent modules are not unit tested
+- Tests use vitest (287 tests across 17 files) – pure-function tests for parser, schema, URL, CSV, JSON, retry, rate-limiter, consent, unrecoverable, batch-utils, validate, scroller, storage-types, scrape-location, extractor-selectors, extractor, auth; Playwright-dependent modules are not unit tested
 - `parseInputFile()`, `slugify()`, and `deduplicateFilename()` in batch.ts are exported for testability
 - `parseReview()`, `parseReviewCount()`, and `detectLanguage()` in parser.ts are exported for testability
 - `parseRatingText()` in business-extractor.ts is exported for testability (called Node-side after `page.evaluate()` returns the raw aria-label string)
@@ -104,3 +112,4 @@ URL input → `parseGoogleMapsInput()` validates → `scrapeLocation(parsed)` la
 - `extractPlaceIdFromUrl()`, `placeIdsMatch()`, and `canVerifyPlaceIdFormat()` in url.ts are exported for testability (direct tests cover priority, encoding, edge cases, null handling, case-insensitivity, and ChIJ vs 0x format discrimination)
 - `VOLATILE_STORAGE_TYPES` in `src/scraper/storage-types.ts` is a pure constant kept separate from `browser.ts` so tests can pin the cookies-excluded invariant without pulling in Playwright
 - `calculateStaleDelay()` and `shouldContinueScrolling()` in scroller.ts are exported for testability
+- `extractOriginalLanguageFromButtonText()` in extractor.ts is exported for testability – pure helper that parses the human-readable language name out of the translated-review toggle button text ("See original (Polish)" → "Polish", handles nested parens like "Chinese (Simplified)")
