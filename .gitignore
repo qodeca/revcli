@@ -6,5 +6,5 @@ dist/
 *.log
 coverage/
 
-# Xezar local runtime: task history, transcripts, worktrees. Never committed.
+# Local scratch. Never committed.
 .local/

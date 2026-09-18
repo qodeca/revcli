@@ -6,7 +6,7 @@ Guidance for coding agents working in this repository.
 
 This project is managed only by open-source agent clients — OpenCode, pi, and Qwen — running local models attached to those clients. There is no Claude Code or Codex setup here, and none should be introduced. Project guidance lives in this file (`AGENTS.md`); `CLAUDE.md` is not used.
 
-Tasks are coordinated through Xezar (github.com/qodeca/xezar), a local cockpit for agent tasks. The cockpit for this project runs on port 4321 (`http://127.0.0.1:4321`). Agents reach it through the Xezar MCP bridge, registered as the `xezar` MCP server in `opencode.json` (OpenCode), `.pi/mcp.json` (pi), and `.qwen/settings.json` (Qwen). One client owns the project's leader connection at a time. Project configuration and reusable workflows/skills live in `.xezar/`; local task history and worktrees live under `.local/` and are never committed. To wire push notifications to an OpenCode leader, see [docs/xezar-push-connection.md](docs/xezar-push-connection.md).
+Local scratch lives under `.local/` and is never committed.
 
 ## Commands
 
