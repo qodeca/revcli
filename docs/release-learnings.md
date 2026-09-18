@@ -150,17 +150,17 @@ For a brand-new scoped package, the registry is **not** immediately consistent:
 conclude a publish failed because `npm view` 404s — check the version endpoint or the
 tarball, or the npmjs.com package page.
 
-### 4.3 The post-publish check races the registry — a real defect
+### 4.3 The post-publish check races the registry
 
-`scripts/release.mjs` verifies `latest` immediately after publishing. Because of §4.2 that
-check can read `null` and exit 1 **on a publish that succeeded**. This is precisely the
-failure mode the review warned about (findings 12 and 19): a red job on a shipped release,
-which in the workflow means the tag/Release step is skipped and `main`'s manifest falls
-behind the registry.
+`scripts/release.mjs` verifies `latest` after publishing. Because of §4.2 that check read
+`null` on the very first release and exited 1 **on a publish that had succeeded** — exactly
+the failure mode the review warned about (findings 12 and 19): a red job on a shipped
+release, which in the workflow skips the tag/Release step and leaves `main`'s manifest behind
+the registry.
 
-**Fix needed:** make the post-publish check retry with backoff (poll `dist-tags` for up to
-~2 minutes) before declaring failure, and treat a matching `latest` as success. Until then,
-a green `Publish release` step is the only trustworthy signal that the publish completed.
+**Fixed:** the check now polls `dist-tags` up to 12 times at 10 s intervals before declaring
+failure, and its failure message states that the publish may have succeeded so nobody
+re-dispatches.
 
 ### 4.4 GitHub Actions
 
@@ -226,7 +226,6 @@ a green `Publish release` step is the only trustworthy signal that the publish c
 
 | Item | Why it matters |
 |---|---|
-| Retry the post-publish check (§4.3) | Otherwise the first automated release will report failure on a successful publish and skip the tag. |
 | Tag + GitHub Release for `v0.1.3` | The bootstrap was a local publish, so no tag/Release was created. Create them by hand at the released commit. |
 | Trusted publisher on npmjs.com | Required before the first *automated* release. |
 | `production` environment + required reviewer | Without it the human gate is silently absent. |

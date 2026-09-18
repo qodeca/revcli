@@ -205,10 +205,26 @@ const args = [
 console.log(`release: npm ${args.join(' ')}`);
 runNpm(args);
 
+// The registry is eventually consistent: right after a publish — especially a first one — the
+// packument can 404 for a minute or two while the version endpoint and the tarball are already
+// live. Poll instead of reporting a false failure on a publish that succeeded; a red job here
+// would skip the tag/Release step and leave main's manifest behind the registry.
 if (!dryRun) {
-  const latest = publishedLatest();
+  const attempts = 12;
+  const delayMs = 10_000;
+  let latest = publishedLatest();
+  for (let i = 1; latest !== version && i < attempts; i += 1) {
+    console.log(
+      `release: registry has not caught up yet (latest=${latest ?? 'unavailable'}) — retry ${i}/${attempts - 1}…`,
+    );
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+    latest = publishedLatest();
+  }
   if (latest !== version) {
-    fail(`post-publish check failed: the registry's latest is ${latest}, expected ${version}.`);
+    fail(
+      `post-publish check failed: the registry's latest is ${latest ?? 'unavailable'}, expected ${version}. ` +
+        'The publish itself may have succeeded — check the registry by hand before re-dispatching.',
+    );
   }
   console.log(`release: verified — ${pkg.name} latest is now ${version}.`);
 }

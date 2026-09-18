@@ -81,10 +81,10 @@ Two things behave differently from later releases:
   (`/@qodeca%2Frevcli/0.1.3`) and the **tarball** return 200. `npm install` and `npm view`
   read the packument, so both fail during that window even though the package exists. Check
   the version endpoint, the tarball, or the npmjs.com page before concluding a publish failed.
-- **`release.mjs`'s post-publish check can report a false failure.** It verifies `latest`
-  immediately, so during that window it reads `null` and exits 1 on a publish that actually
-  succeeded. Confirm against the registry by hand; the retry fix is still outstanding (see
-  [release-learnings.md](release-learnings.md) §4.3).
+- **The post-publish check polls through the lag.** `release.mjs` verifies `latest` by
+  retrying `dist-tags` for up to ~2 minutes, so it does not report a false failure on a
+  publish that succeeded. If it does still fail, its message says the publish may have
+  succeeded — check the registry by hand before re-dispatching.
 
 The bootstrap also creates **no tag and no GitHub Release** — it is a local publish, not the
 workflow. Create them by hand at the released commit.
