@@ -196,6 +196,14 @@ Set that only for a session in which you intend to authorise the approval, and o
 agent has told you the run id it is about to approve. Approving by hand in the UI needs no flag —
 that is the path of least resistance, and the one to prefer.
 
+**It matches the raw tool input, not a parsed command, so it fires on prose as well.** A
+`gh pr create --body` or a commit message that merely *quotes* one of the two strings is denied,
+and so is a read-only `grep` whose pattern contains one. Writing a file that contains them is
+fine — file contents do not pass through tool input — but passing that content *as* tool input
+(a heredoc inside a command, `write_file`) is not. That is the deliberate trade recorded in the
+script's header: it cannot fail open on a malformed payload. The practical rule when writing
+*about* the gate is to describe the two strings rather than quote them.
+
 > **If the reviewer is unavailable**, the run waits indefinitely. The fix is a **second
 > required reviewer** on the `production` environment — arrange that in advance. Changing the
 > environment's protection rules (see [publishing.md](publishing.md) §3) is a human-only
