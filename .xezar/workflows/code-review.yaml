@@ -1,8 +1,0 @@
-name: code-review
-description: Review a pull request or the current branch diff against this repo's architecture and conventions. Read-only — no edits, no comments, no pushes.
-steps:
-  - id: review
-    name: Review
-    prompt: "{{task}}"
-    skill: revcli-code-review
-    allowedTools: [Read, Grep, Glob, Bash]

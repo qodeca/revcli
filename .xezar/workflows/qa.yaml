@@ -1,8 +1,0 @@
-name: qa
-description: Independently verify one revision by running this repo's real commands and exercising the built CLI. Read-only — no edits, no pushes, no label writes.
-steps:
-  - id: review
-    name: QA
-    prompt: "QA (report each criterion as met, not met, or not verifiable): {{task}}"
-    skill: revcli-qa
-    allowedTools: [Read, Grep, Glob, Bash]

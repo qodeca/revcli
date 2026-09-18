@@ -28,7 +28,7 @@ A release is **two dispatches separated by a PR merge**:
 3. `bump = existing` → builds, verifies, publishes the version already committed on `main`,
    tags `vX.Y.Z`, creates the GitHub Release.
 
-Why not the simpler "stamp → publish → open a bump PR" (which is what `@qodeca/xezar` does)?
+Why not the simpler "stamp → publish → open a bump PR" (the obvious first design)?
 Because the stamp lives only in the workspace, so `main`'s manifest lags the registry. That
 produces two real defects:
 

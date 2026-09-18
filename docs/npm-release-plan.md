@@ -1,13 +1,13 @@
 # revcli → npm release plan (enhanced)
 
-This plan publishes `revcli` to npmjs.org as a standard package, modeled on the
-existing `@qodeca/xezar` release process, and incorporates every actionable
+This plan publishes `revcli` to npmjs.org as a standard package, modeled on an
+existing, proven scoped-package release process, and incorporates every actionable
 finding from the multi-lens review (see [Findings addressed](#findings-addressed)).
 
 Key decisions were resolved with common judgment (not left open):
 
-- **D1 – Package name:** `@qodeca/revcli` (scoped). Consistent with `@qodeca/xezar`,
-  ties ownership to the org, reduces typosquatting risk for a ToS-sensitive tool.
+- **D1 – Package name:** `@qodeca/revcli` (scoped). Keeps the scope tied to the org
+  and reduces typosquatting risk for a ToS-sensitive tool.
   The `bin` stays `revcli`, so the CLI command is unchanged.
 - **D2 – Playwright dependency:** keep `playwright` as a runtime dependency. Verified
   that `playwright@1.63.0` has **no** postinstall, so browsers are **not**
@@ -218,7 +218,7 @@ attach a publisher until the package exists). Bootstrap by hand:
 
 ### C1. `scripts/release.mjs` (single-package)
 
-A single-package port of xezar's orchestrator that **fails loudly when it has no
+A single-package release orchestrator that **fails loudly when it has no
 credential** (it never degrades to a dry run). Order matters — this is the fix for the
 version-desync blocker:
 
@@ -328,7 +328,7 @@ On <https://www.npmjs.com/package/@qodeca/revcli/access>, under **Trusted Publis
   disallow tokens"** (Settings → Publishing access) so a leaked token cannot bypass the
   OIDC identity binding.
 - **Prove it:** dispatch the workflow once and confirm it actually publishes before
-  relying on it (the xezar 0.10.2 failure mode was an empty publisher form silently
+  relying on it (a known failure mode is an empty publisher form silently
   accepted as "configured").
 
 ---
