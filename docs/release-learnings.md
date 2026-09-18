@@ -174,6 +174,12 @@ re-dispatches.
 - **Events triggered by the repo's own `GITHUB_TOKEN` create no workflow runs at all**, and
   a manually dispatched run has `event: workflow_dispatch`. A gate that accepts only
   `event: 'push'` can be permanently unsatisfiable for such a commit.
+  **Consequence here:** the `prepare` job opens the version-bump PR with `GITHUB_TOKEN`, so
+  that PR gets **no CI at all** — `gh pr checks <n>` reports "no checks reported on the
+  branch". It is harmless (the PR only touches `package.json` and `package-lock.json`, and
+  the gate verifies CI on the *merge commit*), but do not read it as a broken pipeline. If a
+  bump PR ever needed real CI, it would have to be opened with a PAT rather than
+  `GITHUB_TOKEN`.
 - **`${{ }}` in a `run:` block is shell injection** — GitHub substitutes before the shell
   parses, so quotes do not contain anything. Pass values through `env:` and quote the
   variable.
@@ -222,12 +228,22 @@ re-dispatches.
 
 ---
 
-## 5. Outstanding work
+## 5. Where this stands
+
+Completed:
+
+| Item | Evidence |
+|---|---|
+| Tag + GitHub Release `v0.1.3` | `v0.1.3` at `34fe8f7` — the commit the bootstrap built from. |
+| Trusted publisher | `qodeca/revcli` + `release.yml` + `production`, `npm publish` allowed. |
+| `production` environment | required reviewer `marcinobel`, restricted to `main`. |
+| **OIDC path proven** | `0.1.4` published by the workflow (run `35360004302`) with a **SLSA provenance attestation** — the bootstrap had none. |
+| Bootstrap credential revoked | `npm logout` — no `_authToken` left in `~/.npmrc`. |
+
+Still open:
 
 | Item | Why it matters |
 |---|---|
-| Tag + GitHub Release for `v0.1.3` | The bootstrap was a local publish, so no tag/Release was created. Create them by hand at the released commit. |
-| Trusted publisher on npmjs.com | Required before the first *automated* release. |
-| `production` environment + required reviewer | Without it the human gate is silently absent. |
-| Prove the OIDC path with one real dispatch | The bootstrap shipped without an attestation; only a workflow publish proves the publisher is configured. |
+| Publishing access still allows bypass-2FA tokens | The package is set to "Require two-factor authentication **or** a granular access token with bypass 2fa enabled". Switch to "…and **disallow** bypass 2fa tokens" once nothing depends on the token path. |
+| Bump PRs get no CI (§4.4) | Harmless today; changing it needs a PAT-opened PR. |
 | Consider the full 3-job split (finding 10) | The reduced form is in place; a separate verify/publish/record split would narrow the OIDC window further. |
