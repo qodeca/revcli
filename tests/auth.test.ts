@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import {
   isGoogleAuthUrl,
   hasGoogleAuthSession,
+  decideSignedIn,
+  GOOGLE_AUTH_COOKIES,
 } from "../src/scraper/auth.js";
 
 describe("isGoogleAuthUrl", () => {
@@ -71,6 +73,15 @@ describe("hasGoogleAuthSession", () => {
     expect(hasGoogleAuthSession(["__Secure-3PSID"])).toBe(true);
   });
 
+  it("is true for every cookie in GOOGLE_AUTH_COOKIES", () => {
+    // Pin the whole authoritative set so a name dropped from the source of
+    // truth can never silently pass here. The presence of any one of these
+    // on `.google.com` means an authenticated session.
+    for (const name of GOOGLE_AUTH_COOKIES) {
+      expect(hasGoogleAuthSession([name])).toBe(true);
+    }
+  });
+
   it("is false for a signed-out profile (only non-auth cookies)", () => {
     expect(
       hasGoogleAuthSession([
@@ -84,5 +95,20 @@ describe("hasGoogleAuthSession", () => {
 
   it("is false for an empty cookie set", () => {
     expect(hasGoogleAuthSession([])).toBe(false);
+  });
+});
+
+describe("decideSignedIn", () => {
+  it("uses the authoritative cookie result when cookie inspection succeeds", () => {
+    expect(decideSignedIn(true, true, false)).toBe(true);
+    expect(decideSignedIn(true, false, false)).toBe(false);
+    expect(decideSignedIn(true, false, true)).toBe(false);
+  });
+
+  it("falls back to the DOM sign-in button when cookie inspection fails", () => {
+    // No "Sign in" button rendered => treated as signed in.
+    expect(decideSignedIn(false, false, false)).toBe(true);
+    // "Sign in" button rendered => not signed in.
+    expect(decideSignedIn(false, false, true)).toBe(false);
   });
 });

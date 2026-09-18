@@ -2,8 +2,10 @@ import type { Page } from "playwright";
 import type { Review } from "../core/schema.js";
 import {
   captureOriginalTexts,
+  enrichReviews,
   expandAllReviews,
   extractReviews,
+  restoreTranslations,
   type RawReview,
 } from "./extractor.js";
 import { parseReview } from "./parser.js";
@@ -12,6 +14,20 @@ import { SELECTORS } from "./selectors.js";
 
 const MAX_STALE_SCROLLS = 6;
 const MAX_SPINNER_WITHOUT_PROGRESS = 3;
+// Named magic numbers for the scroll-collect loop so the wait/scroll strategy
+// is auditable in one place (C6).
+const DEFAULT_DELAY_MS = 3000;
+const DOM_SETTLE_MS = 500;
+const LOADING_CHECK_TIMEOUT_MS = 100;
+const LOADING_WAIT_TIMEOUT_MS = 5000;
+const SCROLL_DISTANCE = 800;
+const SCROLL_STEP = 1000;
+
+/** Progress counters threaded through the scroll-collect state machine. */
+interface CycleState {
+  staleScrollCount: number;
+  spinnerWithoutProgressCount: number;
+}
 
 export interface ScrollOptions {
   maxReviews?: number;
@@ -50,7 +66,7 @@ async function isLoadingVisible(page: Page): Promise<boolean> {
     return await page
       .locator(SELECTORS.loadingIndicator)
       .first()
-      .isVisible({ timeout: 100 });
+      .isVisible({ timeout: LOADING_CHECK_TIMEOUT_MS });
   } catch {
     return false;
   }
@@ -62,7 +78,7 @@ async function isLoadingVisible(page: Page): Promise<boolean> {
  */
 async function waitForLoadingComplete(
   page: Page,
-  timeout: number = 5000,
+  timeout: number = LOADING_WAIT_TIMEOUT_MS,
 ): Promise<void> {
   try {
     await page
@@ -130,6 +146,95 @@ function collectNewReviews(
 }
 
 /**
+ * Extract, capture original text for, enrich, and collect reviews in one pass.
+ * Returns the count of newly collected reviews, or -1 if maxReviews was reached.
+ * Failed restores are recorded in `restoreFailedIds` so the caller re-toggles
+ * them at the next loop start.
+ */
+async function collectOnce(
+  page: Page,
+  collectedIds: Set<string>,
+  reviews: Review[],
+  maxReviews: number | undefined,
+  restoreFailedIds: Set<string>,
+): Promise<number> {
+  const rawReviews = await extractReviews(page);
+  // Capture original text for translated reviews not yet collected. Filtering
+  // on collectedIds ensures each review is toggled at most once per scrape.
+  const capture = await captureOriginalTexts(
+    page,
+    rawReviews.filter((r) => !collectedIds.has(r.reviewId)),
+  );
+  for (const id of capture.restoreFailedIds) restoreFailedIds.add(id);
+  const enriched = enrichReviews(rawReviews, capture.results);
+  return collectNewReviews(enriched, collectedIds, reviews, maxReviews);
+}
+
+/**
+ * The spinner-retry branch: wait for the loading indicator to clear, then
+ * re-extract and collect once more. Returns the newly collected count, or -1
+ * when the max limit was reached.
+ */
+async function retryAfterLoading(
+  page: Page,
+  collectedIds: Set<string>,
+  reviews: Review[],
+  maxReviews: number | undefined,
+  restoreFailedIds: Set<string>,
+): Promise<number> {
+  await waitForLoadingComplete(page, LOADING_WAIT_TIMEOUT_MS);
+  return collectOnce(page, collectedIds, reviews, maxReviews, restoreFailedIds);
+}
+
+/**
+ * Advance the scroll-collect state machine after one cycle. `newCount` is the
+ * number of newly collected reviews (ignored when 0); `loading` is whether a
+ * spinner was visible during the cycle. Returns the updated counters and
+ * whether collection should stop (only ever true when a spinner was NOT the
+ * cause, i.e. a genuine stale end-of-list).
+ */
+function decideCycle(
+  newCount: number,
+  loading: boolean,
+  state: CycleState,
+): { state: CycleState; stop: boolean } {
+  if (newCount > 0) {
+    return {
+      state: { staleScrollCount: 0, spinnerWithoutProgressCount: 0 },
+      stop: false,
+    };
+  }
+  if (loading) {
+    // Spinner visible but no new reviews – cap to prevent an infinite loop.
+    const next = state.spinnerWithoutProgressCount + 1;
+    if (next >= MAX_SPINNER_WITHOUT_PROGRESS) {
+      return {
+        state: {
+          staleScrollCount: state.staleScrollCount + 1,
+          spinnerWithoutProgressCount: 0,
+        },
+        stop: false,
+      };
+    }
+    return {
+      state: {
+        staleScrollCount: state.staleScrollCount,
+        spinnerWithoutProgressCount: next,
+      },
+      stop: false,
+    };
+  }
+  const nextStale = state.staleScrollCount + 1;
+  return {
+    state: {
+      staleScrollCount: nextStale,
+      spinnerWithoutProgressCount: state.spinnerWithoutProgressCount,
+    },
+    stop: !shouldContinueScrolling(nextStale, MAX_STALE_SCROLLS),
+  };
+}
+
+/**
  * Scroll and collect reviews from the currently active sort order.
  */
 async function collectFromCurrentSort(
@@ -139,24 +244,23 @@ async function collectFromCurrentSort(
   reviews: Review[],
   options: ScrollOptions,
 ): Promise<void> {
-  let staleScrollCount = 0;
-  let spinnerWithoutProgressCount = 0;
+  let state: CycleState = { staleScrollCount: 0, spinnerWithoutProgressCount: 0 };
+  const restoreFailedIds = new Set<string>();
 
   while (true) {
-    await expandAllReviews(page);
+    // Re-toggle any card left showing its original language so extractReviews
+    // never reads a stale original text as `text`.
+    if (restoreFailedIds.size > 0) {
+      await restoreTranslations(page, restoreFailedIds);
+    }
 
-    const rawReviews = await extractReviews(page);
-    // Capture original text for translated reviews not yet collected. Filtering
-    // on collectedIds ensures each review is toggled at most once per scrape.
-    await captureOriginalTexts(
+    await expandAllReviews(page);
+    const newCount = await collectOnce(
       page,
-      rawReviews.filter((r) => !collectedIds.has(r.reviewId)),
-    );
-    const newCount = collectNewReviews(
-      rawReviews,
       collectedIds,
       reviews,
       options.maxReviews,
+      restoreFailedIds,
     );
 
     if (newCount === -1) {
@@ -164,71 +268,56 @@ async function collectFromCurrentSort(
       return;
     }
 
+    let decision: { state: CycleState; stop: boolean };
     if (newCount > 0) {
       logger.debug(`+${newCount} new reviews (total: ${reviews.length})`);
-      staleScrollCount = 0;
-      spinnerWithoutProgressCount = 0;
+      decision = decideCycle(newCount, false, state);
     } else {
       const loading = await isLoadingVisible(page);
       if (loading) {
-        await waitForLoadingComplete(page, 5000);
-
-        // Re-extract after loading completes
-        const retryRaw = await extractReviews(page);
-        await captureOriginalTexts(
+        const retryNewCount = await retryAfterLoading(
           page,
-          retryRaw.filter((r) => !collectedIds.has(r.reviewId)),
-        );
-        const retryNewCount = collectNewReviews(
-          retryRaw,
           collectedIds,
           reviews,
           options.maxReviews,
+          restoreFailedIds,
         );
-
         if (retryNewCount === -1) {
           logger.info(`Reached max reviews limit (${options.maxReviews})`);
           return;
         }
-
         if (retryNewCount > 0) {
           logger.debug(
             `+${retryNewCount} new reviews after loading (total: ${reviews.length})`,
           );
-          staleScrollCount = 0;
-          spinnerWithoutProgressCount = 0;
-        } else {
-          // Spinner visible but no new reviews – cap to prevent infinite loop
-          spinnerWithoutProgressCount++;
-          if (spinnerWithoutProgressCount >= MAX_SPINNER_WITHOUT_PROGRESS) {
-            staleScrollCount++;
-            spinnerWithoutProgressCount = 0;
-          }
         }
+        decision = decideCycle(retryNewCount, true, state);
       } else {
-        staleScrollCount++;
-        if (!shouldContinueScrolling(staleScrollCount, MAX_STALE_SCROLLS)) {
-          logger.info(
-            `No new reviews after scrolling – no more reviews available (${reviews.length} total)`,
-          );
-          return;
-        }
+        decision = decideCycle(0, false, state);
       }
+    }
+    state = decision.state;
+
+    if (decision.stop) {
+      logger.info(
+        `No new reviews after scrolling – no more reviews available (${reviews.length} total)`,
+      );
+      return;
     }
 
     await scrollDown(page, scrollContainer);
 
-    const baseDelay = options.delayMs || 3000;
+    const baseDelay = options.delayMs || DEFAULT_DELAY_MS;
     const delayBase =
-      staleScrollCount > 0
-        ? calculateStaleDelay(staleScrollCount, baseDelay)
+      state.staleScrollCount > 0
+        ? calculateStaleDelay(state.staleScrollCount, baseDelay)
         : baseDelay;
     const delay = Math.round(
       delayBase + delayBase * 0.3 * (Math.random() - 0.5),
     );
     await page.waitForTimeout(delay);
     // Allow DOM to settle after scroll animation
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(DOM_SETTLE_MS);
   }
 }
 
@@ -300,12 +389,12 @@ async function scrollDown(
   if (!box) return;
 
   await page.mouse.move(box.x, box.y);
-  await page.mouse.wheel(0, 800);
+  await page.mouse.wheel(0, SCROLL_DISTANCE);
 
   await page.evaluate((sel) => {
     const container = document.querySelector(sel);
     if (container) {
-      container.scrollTop += 1000;
+      container.scrollTop += SCROLL_STEP;
     }
   }, containerSelector);
 }

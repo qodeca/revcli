@@ -68,7 +68,6 @@ export function isUnrecoverable(error: Error): boolean {
     message.includes("executable doesn't exist") ||
     message.includes("browser has been closed") ||
     message.includes("browsertype.launch") ||
-    message.includes("sort verification failed") ||
     message.includes("navigation verification failed")
   );
 }

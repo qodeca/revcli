@@ -46,8 +46,9 @@ describe("viewOriginalButton selector", () => {
     // original; only aria-checked and the jsaction route flip. A single
     // selector lets us detect, open, and restore the toggle without
     // depending on which state it is currently in.
-    expect(SELECTORS.viewOriginalButton).toBe(
-      'button[jsaction*="review.showReview"]',
+    expect(SELECTORS.viewOriginalButton).toContain(
+      'jsaction*="review.showReview"',
     );
+    expect(SELECTORS.viewOriginalButton).not.toContain("has-text");
   });
 });

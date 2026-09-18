@@ -108,6 +108,18 @@ describe("parseReview", () => {
     expect(result!.ownerResponse).toBeNull();
   });
 
+  it("keeps ownerResponse originalText/originalLanguage null (no mirror)", () => {
+    const result = parseReview(
+      makeRawReview({
+        ownerResponseText: "Thank you!",
+        ownerResponseTime: "a week ago",
+      }),
+    );
+    expect(result!.ownerResponse!.text).toBe("Thank you!");
+    expect(result!.ownerResponse!.originalText).toBeNull();
+    expect(result!.ownerResponse!.originalLanguage).toBeNull();
+  });
+
   it("preserves rating=0 when stars selector is stale", () => {
     const result = parseReview(makeRawReview({ rating: 0 }));
     expect(result).not.toBeNull();
@@ -225,6 +237,14 @@ describe("parseReviewCount", () => {
     // would ideally return 1234 but the parser bails defensively. The reconciliation
     // will backfill via reviews.length, so user-visible behavior is correct.
     expect(parseReviewCount("4.5 stars · 1,234 reviews")).toBeNull();
+  });
+
+  // Leading-minus / negative path
+  it("ignores a leading minus and parses the non-negative digit run", () => {
+    // The digit-run regex only matches non-negative integers, so a leading '-'
+    // before the number is never part of the captured run; the negative guard
+    // in the function is defensive-only (unreachable). Pins the actual behavior.
+    expect(parseReviewCount("-5 reviews")).toBe(5);
   });
 
   // Primary English case (comma separator)

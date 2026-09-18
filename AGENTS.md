@@ -70,7 +70,7 @@ URL input → `parseGoogleMapsInput()` validates → `scrapeLocation(parsed)` la
 
 ### Patterns to know
 
-- **Persistent browser profile**: `launchBrowser()` uses `chromium.launchPersistentContext()` with `~/.revcli/chrome-profile/`. Google auth cookies survive between CLI runs. The `PROFILE_DIR` constant is exported from `browser.ts`.
+- **Persistent browser profile**: `launchBrowser()` uses `chromium.launchPersistentContext()` with `~/.revcli/chrome-profile/`. Google auth cookies survive between CLI runs. The `PROFILE_DIR` constant is exported from `browser.ts`. `ensureProfileDir()` in `browser.ts` creates the directory with owner-only `0700` permissions – it is a **credential store** holding your Google session cookies, so it must never be shared, backed up, or committed. The profile's spoofed user-agent and `navigator.webdriver` masking are ToS-sensitive (see the anti-automation note in README's Legal notice); removing them would break unauthenticated scraping.
 - **Authentication flow**: Google Maps shows a "limited view" (no Reviews tab) to unauthenticated EEA users. `revcli auth` opens a browser for manual sign-in. The scrape command also detects limited view inline and can prompt for auth in headed mode.
 - **Default headed mode**: The browser shows by default so users can observe scraping. Use `--headless` to hide it. This is the opposite of most scrapers – it's intentional because auth requires a visible browser.
 - **URL normalization**: `appendHlParam()` in `consent.ts` always forces `hl=en` and strips `g_ep`/`entry` tracking params that trigger Google's limited view. This runs before every navigation.
@@ -102,7 +102,7 @@ URL input → `parseGoogleMapsInput()` validates → `scrapeLocation(parsed)` la
 - ESM-only (`"type": "module"`, `.js` extensions in imports)
 - Node 22+ required
 - Strict TypeScript, zero `any` types
-- Tests use vitest (263 tests across 17 files) – pure-function tests for parser, schema, URL, CSV, JSON, retry, rate-limiter, consent, unrecoverable, batch-utils, validate, scroller, storage-types, scrape-location, extractor-selectors, extractor; Playwright-dependent modules are not unit tested
+- Tests use vitest (287 tests across 17 files) – pure-function tests for parser, schema, URL, CSV, JSON, retry, rate-limiter, consent, unrecoverable, batch-utils, validate, scroller, storage-types, scrape-location, extractor-selectors, extractor, auth; Playwright-dependent modules are not unit tested
 - `parseInputFile()`, `slugify()`, and `deduplicateFilename()` in batch.ts are exported for testability
 - `parseReview()`, `parseReviewCount()`, and `detectLanguage()` in parser.ts are exported for testability
 - `parseRatingText()` in business-extractor.ts is exported for testability (called Node-side after `page.evaluate()` returns the raw aria-label string)

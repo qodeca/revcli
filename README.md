@@ -206,7 +206,7 @@ revcli auth status         # Check auth state
 revcli auth logout         # Clear session
 ```
 
-**How it works:** revcli uses a persistent Chrome profile at `~/.revcli/chrome-profile/`. Sign in once with `revcli auth`, and all subsequent scrapes reuse that session. Google auth cookies persist between CLI runs.
+**How it works:** revcli uses a persistent Chrome profile at `~/.revcli/chrome-profile/`. Sign in once with `revcli auth`, and all subsequent scrapes reuse that session. Google auth cookies persist between CLI runs. The profile is a **credential store** holding your Google session cookies — it is created with owner-only (`0700`) permissions. Do not share it or back it up; anyone with read access to it can act as your signed-in session.
 
 ## Output schema
 
@@ -304,8 +304,8 @@ Run any command with `-v, --verbose` for debug-level logs including selector par
 
 - **Selector fragility** – Google Maps uses obfuscated CSS class names that change periodically. When this happens, the scraper returns zero reviews. All selectors are centralized in `src/scraper/selectors.ts` for easy updating.
 - **Relative timestamps** – Google Maps shows review times as "2 weeks ago" rather than exact dates. These are captured as-is.
-- **No translation toggle** – The tool captures whatever text Google displays (usually auto-translated). The original language text requires clicking "See original" which is not currently automated.
-- **Language detection** – The `originalLanguage` field uses a simple Arabic/Latin script heuristic, not full language identification.
+- **Original-language capture is best-effort** – for translated reviews revcli clicks "See original" to capture `originalText`/`originalLanguage`, then restores the translation. If a card cannot be restored it is re-toggled on the next cycle; if the original text fails to render the capture is skipped rather than recorded as the translation. Reviews written in the UI locale (`hl=en`) have `originalText`/`originalLanguage` as `null` (no toggle exists).
+- **Language detection** – the `originalLanguage` field is the human-readable name Google labels the source text with (e.g. "Polish"), or `null` when no "See original" toggle exists. It is not an ISO 639 code.
 - **`newest` sort filtering** – Google Maps applies hidden recency/verification filters when sorting by newest. The collected review count can plateau below the header-reported total (this is Google-side behaviour, not a scraper bug).
 
 ## Maintenance
@@ -325,7 +325,7 @@ npx playwright install chromium
 
 ```bash
 npm run dev -- scrape 'https://maps.app.goo.gl/...' -m 5    # Run from source
-npm test                                                      # Run all tests (238)
+npm test                                                      # Run all tests (287)
 npx vitest run tests/parser.test.ts                           # Run single test file
 npm run typecheck                                             # Type check
 npm run build                                                 # Build to dist/
@@ -376,6 +376,8 @@ This tool automates a web browser to access publicly available information on Go
 - The authors do not encourage or condone use of this tool in violation of any terms of service
 - Use reasonable delays between requests to avoid excessive load on Google's servers
 - This tool is not affiliated with, endorsed by, or connected to Google in any way
+
+> **Anti-automation note:** to work around Google's EEA "limited view" and to read the same page a human browser sees, revcli presents itself as a regular browser session — it uses a persistent Chrome profile, a user-agent string matching a real Chrome build, and a script that masks the `navigator.webdriver` flag. This impersonation is ToS-sensitive: Google may rate-limit or block accounts/IPs that appear to be automating Maps. Use it sparingly, keep delays generous, and only on data you have the right to collect. Removing the evasion would break unauthenticated scraping, which is why it is documented rather than disabled.
 
 ## License
 

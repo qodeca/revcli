@@ -16,7 +16,9 @@ import { logger } from "../utils/logger.js";
  * reviews.length so the user-visible count is still correct.
  *
  * Returns null when: empty/whitespace input, no "review" keyword, no digits,
- * suffix form detected, or the matched digits parse to NaN/negative.
+ * or a suffix form detected. The digit-run regex only matches non-negative
+ * integers, so NaN is the only parse failure possible (a defensive negative
+ * guard remains but is unreachable).
  */
 export function parseReviewCount(text: string): number | null {
   if (!text || text.trim().length === 0) return null;
@@ -115,8 +117,13 @@ export function parseReview(raw: RawReview): Review | null {
       ownerResponse: raw.ownerResponseText
         ? {
             text: raw.ownerResponseText,
-            originalText: raw.ownerResponseText,
-            originalLanguage: detectLanguage(raw.ownerResponseText),
+            // Owner responses are not run through the "See original" toggle, so
+            // no original text/language is captured. Leaving these null (not a
+            // mirror of the display text) keeps the same invariant the review
+            // level enforces: original* fields are populated only when a real
+            // source is captured.
+            originalText: null,
+            originalLanguage: null,
             publishTime: raw.ownerResponseTime || null,
           }
         : null,
