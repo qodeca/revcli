@@ -1,0 +1,8 @@
+name: research
+description: Answer a question from sources outside this repository as a cited, dated document in docs/research/. No code change and no pull request.
+steps:
+  - id: research
+    name: Research, cite and report
+    prompt: "{{task}}"
+    skill: revcli-research
+    allowedTools: [Read, Grep, Glob, Write, Bash, WebSearch, WebFetch]

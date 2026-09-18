@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "baseBranch": "auto",
+  "tracker": "github",
+  "browser": {
+    "provider": "playwright"
+  },
+  "validation": {
+    "commands": [
+      "npm run typecheck",
+      "npm test",
+      "npm run build"
+    ]
+  },
+  "labels": {
+    "enabled": false
+  },
+  "qaGate": true,
+  "ci": {
+    "maxWaitMinutes": 0
+  },
+  "paths": {
+    "specs": "docs/specs",
+    "research": "docs/research",
+    "runs": ".local/pipeline/runs",
+    "analysis": ".local/pipeline/analysis",
+    "scripts": ".local/pipeline/scripts",
+    "qa": ".local/pipeline/qa"
+  },
+  "reviewChecklist": ".xezar/review-checklist.md",
+  "closeKeywords": []
+}

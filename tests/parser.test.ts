@@ -16,6 +16,8 @@ function makeRawReview(overrides: Partial<RawReview> = {}): RawReview {
     rating: 5,
     text: "Great place!",
     originalText: null,
+    originalLanguage: null,
+    isTranslated: false,
     photos: 0,
     ownerResponseText: null,
     ownerResponseTime: null,
@@ -44,17 +46,23 @@ describe("parseReview", () => {
     expect(result!.id).toMatch(/^[0-9a-f]{16}$/);
   });
 
-  it("copies text to originalText when originalText is null", () => {
+  it("keeps originalText null for a non-translated review (no mirror)", () => {
     const result = parseReview(
       makeRawReview({ text: "Hello", originalText: null }),
     );
     expect(result!.text).toBe("Hello");
-    expect(result!.originalText).toBe("Hello");
+    expect(result!.originalText).toBeNull();
+    expect(result!.originalLanguage).toBeNull();
   });
 
   it("keeps both text and originalText when both present", () => {
     const result = parseReview(
-      makeRawReview({ text: "Translated", originalText: "أصلي" }),
+      makeRawReview({
+        text: "Translated",
+        originalText: "أصلي",
+        originalLanguage: "arabic",
+        isTranslated: true,
+      }),
     );
     expect(result!.text).toBe("Translated");
     expect(result!.originalText).toBe("أصلي");
@@ -98,6 +106,18 @@ describe("parseReview", () => {
       makeRawReview({ ownerResponseText: null }),
     );
     expect(result!.ownerResponse).toBeNull();
+  });
+
+  it("keeps ownerResponse originalText/originalLanguage null (no mirror)", () => {
+    const result = parseReview(
+      makeRawReview({
+        ownerResponseText: "Thank you!",
+        ownerResponseTime: "a week ago",
+      }),
+    );
+    expect(result!.ownerResponse!.text).toBe("Thank you!");
+    expect(result!.ownerResponse!.originalText).toBeNull();
+    expect(result!.ownerResponse!.originalLanguage).toBeNull();
   });
 
   it("preserves rating=0 when stars selector is stale", () => {
@@ -217,6 +237,14 @@ describe("parseReviewCount", () => {
     // would ideally return 1234 but the parser bails defensively. The reconciliation
     // will backfill via reviews.length, so user-visible behavior is correct.
     expect(parseReviewCount("4.5 stars · 1,234 reviews")).toBeNull();
+  });
+
+  // Leading-minus / negative path
+  it("ignores a leading minus and parses the non-negative digit run", () => {
+    // The digit-run regex only matches non-negative integers, so a leading '-'
+    // before the number is never part of the captured run; the negative guard
+    // in the function is defensive-only (unreachable). Pins the actual behavior.
+    expect(parseReviewCount("-5 reviews")).toBe(5);
   });
 
   // Primary English case (comma separator)

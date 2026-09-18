@@ -16,7 +16,9 @@ import { logger } from "../utils/logger.js";
  * reviews.length so the user-visible count is still correct.
  *
  * Returns null when: empty/whitespace input, no "review" keyword, no digits,
- * suffix form detected, or the matched digits parse to NaN/negative.
+ * or a suffix form detected. The digit-run regex only matches non-negative
+ * integers, so NaN is the only parse failure possible (a defensive negative
+ * guard remains but is unreachable).
  */
 export function parseReviewCount(text: string): number | null {
   if (!text || text.trim().length === 0) return null;
@@ -87,17 +89,14 @@ export function parseReview(raw: RawReview): Review | null {
         raw.text?.slice(0, 50),
       );
 
-    // Determine original vs translated text
-    let text = raw.text;
-    let originalText = raw.originalText;
-    let originalLanguage: string | null = null;
-
-    if (originalText && text) {
-      originalLanguage = detectLanguage(originalText);
-    } else if (text) {
-      originalText = text;
-      originalLanguage = detectLanguage(text);
-    }
+    // Determine original vs translated text. The extractor sets
+    // originalText/originalLanguage ONLY for reviews Google actually translated
+    // (detected via the "See original (X)" toggle). A non-translated review has
+    // a genuine null originalText – NOT a mirror of the display text, which was
+    // the old misleading behavior.
+    const text = raw.text;
+    const originalText = raw.originalText;
+    const originalLanguage = raw.originalLanguage;
 
     if (raw.rating === 0) {
       logger.warn(
@@ -118,8 +117,13 @@ export function parseReview(raw: RawReview): Review | null {
       ownerResponse: raw.ownerResponseText
         ? {
             text: raw.ownerResponseText,
-            originalText: raw.ownerResponseText,
-            originalLanguage: detectLanguage(raw.ownerResponseText),
+            // Owner responses are not run through the "See original" toggle, so
+            // no original text/language is captured. Leaving these null (not a
+            // mirror of the display text) keeps the same invariant the review
+            // level enforces: original* fields are populated only when a real
+            // source is captured.
+            originalText: null,
+            originalLanguage: null,
             publishTime: raw.ownerResponseTime || null,
           }
         : null,

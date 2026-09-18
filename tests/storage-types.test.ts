@@ -19,7 +19,7 @@ describe("VOLATILE_STORAGE_TYPES", () => {
   it("does NOT contain 'cookies' (auth-preservation invariant for issue #4)", () => {
     // Cookies must not be cleared – Google Maps auth is cookie-based and
     // clearing them would regress the `revcli auth` flow documented in
-    // CLAUDE.md. This assertion guards that invariant.
+    // AGENTS.md. This assertion guards that invariant.
     expect(tokens).not.toContain("cookies");
   });
 

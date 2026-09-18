@@ -1,0 +1,10 @@
+{
+  "baseBranch": "main",
+  "defaultRunner": "opencode",
+  "reviewGate": false,
+  "systemPrompt": "Work in the revcli repository. Read AGENTS.md first; follow its commands, conventions and architecture. This project is driven only by open-source agent clients (OpenCode, pi, Qwen) with local models - do not switch to another agent, and do not introduce Claude Code or Codex. Verify changes with `npm run typecheck` and the relevant tests under `npm test`; do not weaken checks or fabricate validation. Own only this task's worktree. Do not commit, push, publish or send anything unless the task explicitly authorizes it.",
+  "defaultModels": {
+    "opencode": "mac-m4/qwen38-flash-next-mlx-mixed-4-8bit",
+    "pi": "mac-m4/qwen38-flash-next-mlx-mixed-4-8bit"
+  }
+}

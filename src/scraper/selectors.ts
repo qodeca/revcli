@@ -3,7 +3,7 @@
  * Google uses obfuscated class names that change periodically.
  * Update this file when selectors go stale.
  *
- * Last verified: 2026-04-10
+ * Last verified: 2026-09-17
  */
 
 export const SELECTORS = {
@@ -22,10 +22,23 @@ export const SELECTORS = {
   reviewTimeContainer: "div.DU9Pgb",
   reviewTime: "span.rsqaWe",
   reviewText: "div.MyEned span.wiI7pd",
+  // Container that carries the `lang` attribute of the currently-displayed
+  // review text ("en" for the translation, the original code once toggled).
+  reviewTextContainer: "div.MyEned",
   // Fallback uses `jsaction` not `:has-text("More")` – the latter
   // substring-matches reviewer names like "KHALID ALMORET" (AL·MORE·T)
   // and opens their Local Guide profile on click.
   expandButton: 'button.w8nwRe, button[jsaction*="review.expand"]',
+
+  // Translated-review toggle. Google renders "See original (Polish)" /
+  // "See translation (English)" only for reviews written in a language other
+  // than the UI locale (revcli forces hl=en). The button's semantic jsaction
+  // route (`review.showReviewInOriginal` / `review.showReviewInTranslation`)
+  // is stable and cannot collide with reviewer data; role="switch" +
+  // aria-checked toggles between the translation and the original. Matches
+  // BOTH states so the same selector is used to detect, open and restore.
+  // See docs/selector-maintenance.md for the translation-toggle lesson.
+  viewOriginalButton: 'button[jsaction*="review.showReview"]',
 
   // Owner response
   ownerResponseContainer: "div.CDe7pd",
