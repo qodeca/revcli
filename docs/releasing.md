@@ -34,6 +34,7 @@ gh workflow run release.yml --ref main -f bump=existing
 
 # 5. Approve the `production` gate — see "Approving the gate" below
 # 6. Verify — see "Verifying a release" below
+# 7. Back-merge main into develop — see "Back-merging" below
 ```
 
 ---
@@ -191,6 +192,23 @@ cd - && rm -rf "$TMP"
 
 A workflow-published release **must** show `provenance: true`. The one exception is the
 one-time bootstrap (see below), which has no attestation.
+
+### 7. Back-merging `main` into `develop`
+
+The version-bump PR targets `main`, so `develop` never receives the version and drifts one
+step behind on every release. Close the gap straight after the release:
+
+```bash
+git checkout develop && git pull --ff-only
+git merge origin/main            # fast-forwards when nothing new has landed on develop
+git push
+```
+
+Nothing breaks while it is out of sync — the release workflow reads `main`'s manifest, and
+the next bump computes from `main` — but the drift accumulates, and a feature branched from a
+stale `develop` builds the wrong version locally.
+
+If `develop` has moved on, this is an ordinary merge: resolve it, never force it.
 
 ---
 
