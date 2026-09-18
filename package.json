@@ -1,6 +1,6 @@
 {
   "name": "@qodeca/revcli",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "CLI tool to scrape Google Maps location reviews using Playwright",
   "author": "Qodeca",
   "type": "module",

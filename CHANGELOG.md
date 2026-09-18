@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-09-18
+
 ### Fixed
 - `revcli auth` no longer shuts the browser down as soon as Google Maps renders. It used to exit
   immediately whenever the profile already held a signed-in session, which made it impossible to
@@ -29,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - First public release to npm as `@qodeca/revcli`.
 
-[Unreleased]: https://github.com/qodeca/revcli/compare/v0.1.4...HEAD
+[Unreleased]: https://github.com/qodeca/revcli/compare/v0.1.5...HEAD
+[0.1.5]: https://github.com/qodeca/revcli/releases/tag/v0.1.5
 [0.1.4]: https://github.com/qodeca/revcli/releases/tag/v0.1.4
 [0.1.3]: https://github.com/qodeca/revcli/releases/tag/v0.1.3
