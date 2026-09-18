@@ -89,9 +89,14 @@ Expected job outcomes: `Gate — main, and green CI for this commit` ✓,
 > expected — the workflow opens it with `GITHUB_TOKEN` and GitHub does not trigger workflows
 > for token-created events. The gate verifies CI on the *merge commit* instead.
 
-> The `release/vX.Y.Z` branch is **deleted automatically when the PR merges** — the repository
-> has "automatically delete head branches" enabled. Nothing to clean up by hand. (A bump PR
-> that is closed unmerged leaves its branch behind; delete it manually.)
+> The `release/vX.Y.Z` branch is deleted by the **publish** run once the version it carried is
+> live — the publish job removes it. A bump PR that is closed unmerged, or one whose publish
+> never runs, leaves its branch behind; delete that by hand with
+> `git push origin --delete release/vX.Y.Z`.
+>
+> The repository deliberately does **not** use GitHub's "automatically delete head branches"
+> setting: the trunk sync is a `develop` → `main` PR, and that setting would delete `develop`
+> on every sync.
 
 ### 2. Merge the bump PR
 
