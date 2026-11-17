@@ -38,6 +38,13 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Browser tests (tests/browser) run the in-page scroll/expand/session/navigation code
+      # against local fixtures in headless Chromium. Only the headless shell is needed.
+      # `npm exec --no` uses the locally installed Playwright and never fetches from the registry.
+      # Do not copy this step into release.yml's publish job (it holds id-token: write).
+      - name: Install Chromium (headless shell) for browser tests
+        run: npm exec --no -- playwright install --with-deps --only-shell chromium
+
       - name: Type check
         run: npm run typecheck
 

@@ -5,6 +5,7 @@ import {
   enrichReviews,
   expandAllReviews,
   extractReviews,
+  formatTruncationWarning,
   restoreTranslations,
   type RawReview,
 } from "./extractor.js";
@@ -32,6 +33,17 @@ interface CycleState {
 export interface ScrollOptions {
   maxReviews?: number;
   delayMs: number;
+}
+
+/** Collection state shared by every collect call within one scrape. */
+interface CollectContext {
+  collectedIds: Set<string>;
+  reviews: Review[];
+  maxReviews: number | undefined;
+  /** Cards left showing their original language; re-toggled at the next loop start. */
+  restoreFailedIds: Set<string>;
+  /** Collected reviews whose card still had a pending "More" button when read. */
+  truncatedIds: Set<string>;
 }
 
 /**
@@ -98,24 +110,27 @@ export async function scrollAndCollectReviews(
   page: Page,
   options: ScrollOptions,
 ): Promise<Review[]> {
-  const collectedIds = new Set<string>();
-  const reviews: Review[] = [];
+  const ctx: CollectContext = {
+    collectedIds: new Set<string>(),
+    reviews: [],
+    maxReviews: options.maxReviews,
+    restoreFailedIds: new Set<string>(),
+    truncatedIds: new Set<string>(),
+  };
 
   const scrollContainer = await findScrollContainer(page);
   if (!scrollContainer) {
     logger.warn("Could not find reviews scroll container");
-    return reviews;
+    return ctx.reviews;
   }
 
   logger.info("Scrolling to collect reviews...");
-  await collectFromCurrentSort(
-    page,
-    scrollContainer,
-    collectedIds,
-    reviews,
-    options,
-  );
-  return reviews;
+  await collectFromCurrentSort(page, scrollContainer, ctx, options);
+
+  if (ctx.truncatedIds.size > 0) {
+    logger.warn(formatTruncationWarning(ctx.truncatedIds.size, ctx.reviews.length));
+  }
+  return ctx.reviews;
 }
 
 /**
@@ -148,42 +163,57 @@ function collectNewReviews(
 /**
  * Extract, capture original text for, enrich, and collect reviews in one pass.
  * Returns the count of newly collected reviews, or -1 if maxReviews was reached.
- * Failed restores are recorded in `restoreFailedIds` so the caller re-toggles
- * them at the next loop start.
+ * Failed restores are recorded in `ctx.restoreFailedIds` so the caller
+ * re-toggles them at the next loop start. Reviews collected in this call whose
+ * card still had a pending "More" button are recorded in `ctx.truncatedIds`.
  */
-async function collectOnce(
-  page: Page,
-  collectedIds: Set<string>,
-  reviews: Review[],
-  maxReviews: number | undefined,
-  restoreFailedIds: Set<string>,
-): Promise<number> {
+async function collectOnce(page: Page, ctx: CollectContext): Promise<number> {
   const rawReviews = await extractReviews(page);
   // Capture original text for translated reviews not yet collected. Filtering
   // on collectedIds ensures each review is toggled at most once per scrape.
   const capture = await captureOriginalTexts(
     page,
-    rawReviews.filter((r) => !collectedIds.has(r.reviewId)),
+    rawReviews.filter((r) => !ctx.collectedIds.has(r.reviewId)),
   );
-  for (const id of capture.restoreFailedIds) restoreFailedIds.add(id);
+  for (const id of capture.restoreFailedIds) ctx.restoreFailedIds.add(id);
   const enriched = enrichReviews(rawReviews, capture.results);
-  return collectNewReviews(enriched, collectedIds, reviews, maxReviews);
+
+  const before = new Set(ctx.collectedIds);
+  const newCount = collectNewReviews(
+    enriched,
+    ctx.collectedIds,
+    ctx.reviews,
+    ctx.maxReviews,
+  );
+  for (const r of rawReviews) {
+    if (
+      r.expandPending &&
+      ctx.collectedIds.has(r.reviewId) &&
+      !before.has(r.reviewId)
+    ) {
+      ctx.truncatedIds.add(r.reviewId);
+    }
+  }
+  return newCount;
+}
+
+/**
+ * Expand truncated texts in not-yet-collected cards, then collect. Every
+ * collect path goes through here so no card is collected unexpanded.
+ */
+async function expandAndCollect(page: Page, ctx: CollectContext): Promise<number> {
+  await expandAllReviews(page, ctx.collectedIds);
+  return collectOnce(page, ctx);
 }
 
 /**
  * The spinner-retry branch: wait for the loading indicator to clear, then
- * re-extract and collect once more. Returns the newly collected count, or -1
- * when the max limit was reached.
+ * expand, re-extract and collect once more. Returns the newly collected count,
+ * or -1 when the max limit was reached.
  */
-async function retryAfterLoading(
-  page: Page,
-  collectedIds: Set<string>,
-  reviews: Review[],
-  maxReviews: number | undefined,
-  restoreFailedIds: Set<string>,
-): Promise<number> {
+async function retryAfterLoading(page: Page, ctx: CollectContext): Promise<number> {
   await waitForLoadingComplete(page, LOADING_WAIT_TIMEOUT_MS);
-  return collectOnce(page, collectedIds, reviews, maxReviews, restoreFailedIds);
+  return expandAndCollect(page, ctx);
 }
 
 /**
@@ -240,28 +270,19 @@ function decideCycle(
 async function collectFromCurrentSort(
   page: Page,
   scrollContainer: string,
-  collectedIds: Set<string>,
-  reviews: Review[],
+  ctx: CollectContext,
   options: ScrollOptions,
 ): Promise<void> {
   let state: CycleState = { staleScrollCount: 0, spinnerWithoutProgressCount: 0 };
-  const restoreFailedIds = new Set<string>();
 
   while (true) {
     // Re-toggle any card left showing its original language so extractReviews
     // never reads a stale original text as `text`.
-    if (restoreFailedIds.size > 0) {
-      await restoreTranslations(page, restoreFailedIds);
+    if (ctx.restoreFailedIds.size > 0) {
+      await restoreTranslations(page, ctx.restoreFailedIds);
     }
 
-    await expandAllReviews(page);
-    const newCount = await collectOnce(
-      page,
-      collectedIds,
-      reviews,
-      options.maxReviews,
-      restoreFailedIds,
-    );
+    const newCount = await expandAndCollect(page, ctx);
 
     if (newCount === -1) {
       logger.info(`Reached max reviews limit (${options.maxReviews})`);
@@ -270,25 +291,19 @@ async function collectFromCurrentSort(
 
     let decision: { state: CycleState; stop: boolean };
     if (newCount > 0) {
-      logger.debug(`+${newCount} new reviews (total: ${reviews.length})`);
+      logger.debug(`+${newCount} new reviews (total: ${ctx.reviews.length})`);
       decision = decideCycle(newCount, false, state);
     } else {
       const loading = await isLoadingVisible(page);
       if (loading) {
-        const retryNewCount = await retryAfterLoading(
-          page,
-          collectedIds,
-          reviews,
-          options.maxReviews,
-          restoreFailedIds,
-        );
+        const retryNewCount = await retryAfterLoading(page, ctx);
         if (retryNewCount === -1) {
           logger.info(`Reached max reviews limit (${options.maxReviews})`);
           return;
         }
         if (retryNewCount > 0) {
           logger.debug(
-            `+${retryNewCount} new reviews after loading (total: ${reviews.length})`,
+            `+${retryNewCount} new reviews after loading (total: ${ctx.reviews.length})`,
           );
         }
         decision = decideCycle(retryNewCount, true, state);
@@ -300,7 +315,7 @@ async function collectFromCurrentSort(
 
     if (decision.stop) {
       logger.info(
-        `No new reviews after scrolling – no more reviews available (${reviews.length} total)`,
+        `No new reviews after scrolling – no more reviews available (${ctx.reviews.length} total)`,
       );
       return;
     }
@@ -391,10 +406,13 @@ async function scrollDown(
   await page.mouse.move(box.x, box.y);
   await page.mouse.wheel(0, SCROLL_DISTANCE);
 
-  await page.evaluate((sel) => {
-    const container = document.querySelector(sel);
-    if (container) {
-      container.scrollTop += SCROLL_STEP;
-    }
-  }, containerSelector);
+  // The step is passed as an argument: this closure runs in the browser, where
+  // the Node-side SCROLL_STEP constant does not exist (issue #31).
+  await page.evaluate(
+    ({ sel, step }) => {
+      const container = document.querySelector(sel);
+      if (container) container.scrollTop += step;
+    },
+    { sel: containerSelector, step: SCROLL_STEP },
+  );
 }

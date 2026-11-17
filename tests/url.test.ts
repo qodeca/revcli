@@ -5,7 +5,58 @@ import {
   extractPlaceIdFromUrl,
   placeIdsMatch,
   canVerifyPlaceIdFormat,
+  isSearchResultsUrl,
+  isShortLinkUrl,
+  SHORT_LINK_HOST,
 } from "../src/utils/url.js";
+
+describe("isShortLinkUrl", () => {
+  it("is true for a maps.app.goo.gl share link", () => {
+    expect(SHORT_LINK_HOST).toBe("maps.app.goo.gl");
+    expect(isShortLinkUrl("https://maps.app.goo.gl/MTVGWdpd8vVqTouv9")).toBe(true);
+    expect(isShortLinkUrl("http://maps.app.goo.gl/abc?g_st=ic")).toBe(true);
+  });
+
+  it.each([
+    "https://www.google.com/maps/place/Test/@0,0,15z",
+    "https://www.google.com/maps?continue=https://maps.app.goo.gl/abc",
+    "https://maps.app.goo.gl.example.com/abc",
+    "https://evilmaps.app.goo.gl/abc",
+    "not a url",
+    "",
+  ])("is false for %s", (url) => {
+    expect(isShortLinkUrl(url)).toBe(false);
+  });
+
+  it("is the same host that parseGoogleMapsInput treats as a short URL", () => {
+    expect(parseGoogleMapsInput(`https://${SHORT_LINK_HOST}/abc123`).isShortUrl).toBe(true);
+    expect(() => parseGoogleMapsInput("https://mapsXappXgooXgl/abc123")).toThrow(/Invalid input/);
+  });
+});
+
+describe("isSearchResultsUrl", () => {
+  it("is true for a /maps/search/ page, tracking params included", () => {
+    expect(
+      isSearchResultsUrl(
+        "https://www.google.com/maps/search/coffee+near+me/@52.23,21.01,14z?entry=ttu&g_ep=EgoyMDI2",
+      ),
+    ).toBe(true);
+    expect(isSearchResultsUrl("https://www.google.pl/maps/search/foo/@1,2,3z?hl=en")).toBe(true);
+  });
+
+  it.each([
+    "https://www.google.com/maps/place/Optimo+Nakheel/@24.74,46.64,867m/data=!1s0x3e2ee3641f7016d7:0x8e3a8bcf52dad296",
+    "https://www.google.com/maps?cid=1234567890",
+    "https://www.google.com/maps?ftid=0x3e2ee3641f7016d7:0x8e3a8bcf52dad296",
+    "https://www.google.com/maps/place/?q=place_id:ChIJN1t_tDeuEmsRUsoyG83frY4",
+    "https://www.google.com/maps/place/Caf%C3%A9+S%C5%82odki/@52.2,21.0,17z",
+    "https://www.google.com/maps/searchable-place/",
+    "not a url",
+    "",
+  ])("is false for %s", (url) => {
+    expect(isSearchResultsUrl(url)).toBe(false);
+  });
+});
 
 describe("parseGoogleMapsInput", () => {
   it("parses a long Google Maps URL", () => {

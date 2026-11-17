@@ -3,14 +3,18 @@ import type { BrowserContext, Page } from "playwright";
 import {
   isGoogleAuthUrl,
   hasGoogleAuthSession,
-  decideSignedIn,
+  decideSessionState,
+  authRequiredMessage,
+  authRequiredError,
   GOOGLE_AUTH_COOKIES,
+  type SessionState,
   waitForBrowserClose,
   waitForSignIn,
   waitForUserAuth,
   type ClosableBrowser,
 } from "../src/scraper/auth.js";
 import { UnrecoverableError } from "../src/core/errors.js";
+import { isUnrecoverable } from "../src/core/retry.js";
 
 describe("isGoogleAuthUrl", () => {
   it("treats the sign-in identifier page as auth", () => {
@@ -104,18 +108,56 @@ describe("hasGoogleAuthSession", () => {
   });
 });
 
-describe("decideSignedIn", () => {
-  it("uses the authoritative cookie result when cookie inspection succeeds", () => {
-    expect(decideSignedIn(true, true, false)).toBe(true);
-    expect(decideSignedIn(true, false, false)).toBe(false);
-    expect(decideSignedIn(true, false, true)).toBe(false);
-  });
+describe("decideSessionState", () => {
+  const withAuth = { ok: true, hasAuthCookies: true };
+  const noAuth = { ok: true, hasAuthCookies: false };
+  const failed = { ok: false, hasAuthCookies: false };
 
-  it("falls back to the DOM sign-in button when cookie inspection fails", () => {
-    // No "Sign in" button rendered => treated as signed in.
-    expect(decideSignedIn(false, false, false)).toBe(true);
-    // "Sign in" button rendered => not signed in.
-    expect(decideSignedIn(false, false, true)).toBe(false);
+  it.each([
+    // No auth cookies: signed out whatever the page shows (fast path).
+    [noAuth, "none", "signed-out"],
+    [noAuth, "account", "signed-out"],
+    [noAuth, "sign-in", "signed-out"],
+    // Auth cookies: the marker decides.
+    [withAuth, "account", "signed-in"],
+    [withAuth, "sign-in", "expired"],
+    // Slow load: cookies present, no marker in time – trust the cookies.
+    [withAuth, "none", "unconfirmed"],
+    // Cookie read failed: the marker decides, uncertainty means signed out.
+    [failed, "account", "signed-in"],
+    [failed, "sign-in", "signed-out"],
+    [failed, "none", "signed-out"],
+  ] as const)("cookies %o + marker %s → %s", (cookies, marker, expected) => {
+    expect(decideSessionState(cookies, marker)).toBe(expected);
+  });
+});
+
+describe("authRequiredMessage", () => {
+  const M1 =
+    "Google Maps is showing a limited view: this browser profile is not signed in to Google, or its saved session has expired. Run `revcli auth` to sign in, then run this command again.";
+  const M1B =
+    "Google Maps is showing a limited view even though this browser profile appears to be signed in. Run `revcli auth` to sign in again or switch accounts, then run this command again. If it keeps happening, run without --headless to see what Google shows.";
+
+  it.each(["expired", "signed-out", undefined] as const)(
+    "uses the sign-in wording for %s",
+    (state) => {
+      expect(authRequiredMessage(state)).toBe(M1);
+    },
+  );
+
+  it.each(["signed-in", "unconfirmed"] as const)(
+    "says the profile appears signed in for %s",
+    (state) => {
+      expect(authRequiredMessage(state)).toBe(M1B);
+    },
+  );
+
+  it("builds a non-retried AUTH_REQUIRED error", () => {
+    const err = authRequiredError("expired");
+    expect(err).toBeInstanceOf(UnrecoverableError);
+    expect(err.kind).toBe("AUTH_REQUIRED");
+    expect(err.message).toBe(M1);
+    expect(isUnrecoverable(authRequiredError())).toBe(true);
   });
 });
 
@@ -237,8 +279,36 @@ describe("waitForSignIn", () => {
       ["SID"],
     );
     await expect(
-      waitForSignIn(context, page, { timeoutMs: 1000, pollIntervalMs: 5 }),
+      waitForSignIn(context, page, {
+        timeoutMs: 1000,
+        pollIntervalMs: 5,
+        probe: async () => "signed-in",
+      }),
     ).resolves.toBe("signed-in");
+  });
+
+  it("keeps polling an expired session until the probe reports signed-in", async () => {
+    const { page, context } = makePage("https://www.google.com/maps?hl=en", ["SID"]);
+    const states: SessionState[] = ["expired", "expired", "signed-in"];
+    let calls = 0;
+    const probe = async (): Promise<SessionState> => states[Math.min(calls++, states.length - 1)];
+
+    await expect(
+      waitForSignIn(context, page, { timeoutMs: 1000, pollIntervalMs: 5, probe }),
+    ).resolves.toBe("signed-in");
+    expect(calls).toBeGreaterThanOrEqual(3);
+  });
+
+  it("never returns on an unconfirmed session and times out with AUTH_POLL", async () => {
+    const { page, context } = makePage("https://www.google.com/maps?hl=en", ["SID"]);
+    const err = await waitForSignIn(context, page, {
+      timeoutMs: 30,
+      pollIntervalMs: 5,
+      probe: async () => "unconfirmed",
+    }).catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(UnrecoverableError);
+    expect((err as UnrecoverableError).kind).toBe("AUTH_POLL");
   });
 
   it("returns browser-closed when the user closed the window", async () => {

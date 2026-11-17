@@ -158,12 +158,12 @@ revcli batch urls.json -d ./reviews --sort relevant --verbose
 # Newline-delimited (comments and blank lines ignored)
 # locations.txt
 https://maps.app.goo.gl/MTVGWdpd8vVqTouv9
-https://maps.app.goo.gl/n2kgnxXZnYPYb25CA
+https://www.google.com/maps?ftid=0x3e2ee3641f7016d7:0x8e3a8bcf52dad296
 ```
 
 ```json
 // JSON array
-["https://maps.app.goo.gl/MTVGWdpd8vVqTouv9", "https://maps.app.goo.gl/n2kgnxXZnYPYb25CA"]
+["https://maps.app.goo.gl/MTVGWdpd8vVqTouv9", "https://www.google.com/maps?ftid=0x3e2ee3641f7016d7:0x8e3a8bcf52dad296"]
 ```
 
 ### `revcli validate <file>`
@@ -190,7 +190,7 @@ Manage Google account authentication. Required for EEA users where Google shows 
 | Subcommand | Description |
 |------------|-------------|
 | *(none)* | Open browser and sign in to Google interactively |
-| `status` | Check if currently signed in (headless, exit code 1 if not) |
+| `status` | Check whether Google accepts the saved session (headless; exit code 1 if not signed in or the session has expired) |
 | `logout` | Clear saved browser session |
 
 **Examples:**
@@ -203,7 +203,7 @@ revcli auth logout         # Clear session
 
 **How it works:** revcli uses a persistent Chrome profile at `~/.revcli/chrome-profile/`. Sign in once with `revcli auth`, and all subsequent scrapes reuse that session. Google auth cookies persist between CLI runs. The profile is a **credential store** holding your Google session cookies — it is created with owner-only (`0700`) permissions. Do not share it or back it up; anyone with read access to it can act as your signed-in session.
 
-`revcli auth` always leaves the browser window open: it closes once sign-in is detected, or when you close it yourself. If the profile is already signed in, the window stays open anyway so you can sign out and sign in with a different account — close it when you're done.
+`revcli auth` always leaves the browser window open: it closes once sign-in is detected, or when you close it yourself. If the profile is already signed in, the window stays open anyway so you can sign out and sign in with a different account — close it when you're done. If the saved session has expired (Google shows "Sign in" although the profile still holds its cookies), `revcli auth` says so, waits for a fresh sign-in and closes on its own once it detects it.
 
 ## Output schema
 
@@ -275,7 +275,7 @@ revcli uses [Playwright](https://playwright.dev/) to automate a Chromium browser
 
 1. Launches browser using a saved Chrome profile (`~/.revcli/chrome-profile/`)
 2. Navigates to the Google Maps place URL (strips tracking params, forces English locale)
-3. Handles cookie consent and checks for Google's "limited view" (EEA auth wall)
+3. Handles cookie consent and checks for Google's "limited view" (EEA auth wall): the Reviews tab shows only a few reviews, a "You're seeing a limited view of Google Maps" banner appears, and Sort opens a sign-in dialog. In `--headless` mode the scrape stops with a message to run `revcli auth`; in the default headed mode it asks you to sign in in the browser window and then continues
 4. Opens the Reviews tab and sets the sort order
 5. Scrolls the review panel using mouse wheel events to trigger lazy loading
 6. Extracts review data from the DOM in bulk via `page.evaluate()`
@@ -288,14 +288,17 @@ No Google API key is needed – the tool reads the same public page a regular br
 
 | Symptom | Diagnosis | Fix |
 |---|---|---|
-| "Limited view" appears instead of the Reviews tab | Google's EEA auth wall for unauthenticated users | Run `revcli auth` once to sign in; the persistent profile remembers you |
+| "Google Maps is showing a limited view: this browser profile is not signed in to Google, or its saved session has expired…" | Google's EEA auth wall: the profile is signed out, or its saved session expired (the cookies remain but Google no longer accepts them) | Run `revcli auth` to sign in, then run the command again; `revcli auth status` confirms the session |
+| "Google Maps is showing a limited view even though this browser profile appears to be signed in…" | Google still limits the view for the signed-in account | Run `revcli auth` to sign in again or switch accounts; if it keeps happening, run without `--headless` to see what Google shows |
+| "This link opened a Google Maps search results page, not a single place…" | The link (often an old share link) resolves to a search instead of one place | Open the place in Google Maps, copy its link (Share → Copy link) and run again |
+| Warning: "Could not expand the full text of N of M collected reviews…" | Some "More" buttons could not be expanded; those reviews end with "…" | Run the scrape again; if it persists, check `SELECTORS.expandButton` in `src/scraper/selectors.ts` (see the selector maintenance guide) |
 | URL in command gets mangled, `!` characters rewritten | zsh/bash history expansion on `!` | Always wrap URLs in **single quotes** (`'...'`), never double quotes |
 | Scraper returns 0 reviews with no errors | Selectors may be stale – Google rotates obfuscated classes | Run with `--verbose` and see [docs/selector-maintenance.md](https://github.com/qodeca/revcli/blob/main/docs/selector-maintenance.md) to update selectors |
 | Warning: "N reviews have rating=0 – stars selector may be stale" | The stars selector went stale; reviews still collected, just without star ratings | Update `SELECTORS.stars` in `src/scraper/selectors.ts` |
 | Scraper hangs or times out mid-scroll | Rate limiting or anti-bot throttling | Increase `--delay` (default 3000 ms); for batches, increase `--location-delay` (default 10000 ms) |
 | `business.headerTotalReviews` is `null` in the output | Header parser couldn't read the count; `business.totalReviews` still equals `reviews.length` | Cosmetic – the scrape itself succeeded |
 | Scrape plateaus before reaching the place's full review count | Google Maps filters the `newest` sort by recency/verification; the header number is not ground truth | Expected. Use `--sort relevant` if you need more coverage |
-| "captcha detected" / "UnrecoverableError" | Google challenged the browser; running scrapes from that IP may be throttled | Wait 15–30 minutes; increase delays; consider a different network |
+| "captcha detected" | Google challenged the browser; running scrapes from that IP may be throttled | Wait 15–30 minutes; increase delays; consider a different network |
 
 Run any command with `-v, --verbose` for debug-level logs including selector parse decisions, scroll state, and navigation verification.
 
@@ -309,7 +312,7 @@ Run any command with `-v, --verbose` for debug-level logs including selector par
 
 ## Maintenance
 
-Google rotates the obfuscated CSS class names every few weeks to months. When that happens, the scraper silently returns zero reviews. All selectors live in **`src/scraper/selectors.ts`** – update them in one place. The full update procedure, diagnosis steps, and list of stable vs fragile patterns is in [**docs/selector-maintenance.md**](https://github.com/qodeca/revcli/blob/main/docs/selector-maintenance.md). Read the "Expand button lesson" section there before touching `SELECTORS.expandButton` – it documents a three-revision debugging story that's easy to accidentally undo.
+Google rotates the obfuscated CSS class names every few weeks to months. When that happens, the scraper silently returns zero reviews. All selectors live in **`src/scraper/selectors.ts`** – update them in one place. The full update procedure, diagnosis steps, and list of stable vs fragile patterns is in [**docs/selector-maintenance.md**](https://github.com/qodeca/revcli/blob/main/docs/selector-maintenance.md). Read the "Expand button lesson" section there before touching `SELECTORS.expandButton` – it documents a four-revision debugging story that's easy to accidentally undo.
 
 ## Development
 
@@ -320,7 +323,7 @@ git clone https://github.com/qodeca/revcli.git
 cd revcli
 npm install
 npm run build
-npx playwright install chromium
+npx playwright install chromium   # also needed by `npm test` (browser tests run in headless Chromium)
 npm link              # optional: exposes `revcli` as a global command
 ```
 
@@ -328,7 +331,8 @@ After `npm link`, the `revcli` binary is available system-wide. Without linking,
 
 ```bash
 npm run dev -- scrape 'https://maps.app.goo.gl/...' -m 5    # Run from source
-npm test                                                      # Run all tests
+npm test                                                      # Run all tests (needs Chromium, see above)
+npm run test:browser                                          # Run only the headless-browser tests
 npx vitest run tests/parser.test.ts                           # Run single test file
 npm run typecheck                                             # Type check
 npm run build                                                 # Build to dist/
@@ -370,7 +374,7 @@ Before opening an issue, please include the following so maintainers can reprodu
 
 Known classes of issues and where to look:
 - **Zero reviews returned** or `rating=0` warnings → Google rotated a selector. See [docs/selector-maintenance.md](https://github.com/qodeca/revcli/blob/main/docs/selector-maintenance.md).
-- **`UnrecoverableError` with `NAV_VERIFY`** → cross-contamination guard tripped; the scraper intentionally bails rather than return stale data. Open an issue with the verbose log.
+- **"Navigation verification failed: …"** → cross-contamination guard tripped; the scraper intentionally bails rather than return stale data. Open an issue with the verbose log.
 - **`captcha detected`** → you're being throttled. Not a bug, but an issue helps track frequency.
 
 ## Legal notice

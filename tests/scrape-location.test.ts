@@ -1,5 +1,11 @@
-import { describe, it, expect } from "vitest";
-import { assembleScrapeResult } from "../src/scraper/scrape-location.js";
+import { describe, it, expect, vi } from "vitest";
+import {
+  assembleScrapeResult,
+  navigateWithAuthFallback,
+  type AuthFallbackDeps,
+} from "../src/scraper/scrape-location.js";
+import { authRequiredError, type SessionState } from "../src/scraper/auth.js";
+import { hasUnrecoverableKind } from "../src/core/errors.js";
 import type { Business, Review } from "../src/core/schema.js";
 
 function makeReview(id: string): Review {
@@ -153,5 +159,72 @@ describe("assembleScrapeResult", () => {
 
     expect(reviews.length).toBe(originalLength);
     expect(reviews[0].id).toBe(originalFirstId);
+  });
+});
+
+describe("navigateWithAuthFallback", () => {
+  const M1_START = "Google Maps is showing a limited view: this browser profile is not signed in";
+  const M1B_START = "Google Maps is showing a limited view even though this browser profile appears to be signed in";
+
+  function deps(overrides: Partial<AuthFallbackDeps<{ name: string }>> = {}) {
+    const navigate = vi.fn<() => Promise<{ name: string }>>();
+    const waitForAuth = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
+    const sessionProbe = vi.fn<() => Promise<SessionState>>().mockResolvedValue("expired");
+    return { headless: true, navigate, waitForAuth, sessionProbe, ...overrides };
+  }
+
+  it("fails headless at once with the sign-in wording", async () => {
+    const d = deps();
+    d.navigate.mockRejectedValue(authRequiredError());
+
+    const err = await navigateWithAuthFallback(d).catch((e: unknown) => e);
+
+    expect(hasUnrecoverableKind(err, "AUTH_REQUIRED")).toBe(true);
+    expect((err as Error).message.startsWith(M1_START)).toBe(true);
+    expect(d.waitForAuth).not.toHaveBeenCalled();
+    expect(d.navigate).toHaveBeenCalledTimes(1);
+  });
+
+  it("headed: waits for sign-in and returns the second navigation's result", async () => {
+    const d = deps({ headless: false });
+    d.navigate
+      .mockRejectedValueOnce(authRequiredError())
+      .mockResolvedValueOnce({ name: "B" });
+
+    await expect(navigateWithAuthFallback(d)).resolves.toEqual({ name: "B" });
+    expect(d.waitForAuth).toHaveBeenCalledTimes(1);
+    expect(d.sessionProbe).not.toHaveBeenCalled();
+  });
+
+  it("headed: a limited view after sign-in on a signed-in profile gets the M1b wording", async () => {
+    const d = deps({ headless: false });
+    d.navigate.mockRejectedValue(authRequiredError());
+    d.sessionProbe.mockResolvedValue("signed-in");
+
+    const err = await navigateWithAuthFallback(d).catch((e: unknown) => e);
+
+    expect(hasUnrecoverableKind(err, "AUTH_REQUIRED")).toBe(true);
+    expect((err as Error).message.startsWith(M1B_START)).toBe(true);
+    expect(d.navigate).toHaveBeenCalledTimes(2);
+  });
+
+  it("falls back to the sign-in wording when the session probe fails", async () => {
+    const d = deps();
+    d.navigate.mockRejectedValue(authRequiredError());
+    d.sessionProbe.mockRejectedValue(new Error("page closed"));
+
+    const err = await navigateWithAuthFallback(d).catch((e: unknown) => e);
+
+    expect((err as Error).message.startsWith(M1_START)).toBe(true);
+  });
+
+  it("rethrows any other error unchanged without probing or prompting", async () => {
+    const d = deps({ headless: false });
+    const boom = new Error("boom");
+    d.navigate.mockRejectedValue(boom);
+
+    await expect(navigateWithAuthFallback(d)).rejects.toBe(boom);
+    expect(d.sessionProbe).not.toHaveBeenCalled();
+    expect(d.waitForAuth).not.toHaveBeenCalled();
   });
 });

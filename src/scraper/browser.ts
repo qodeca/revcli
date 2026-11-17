@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { mkdirSync, chmodSync } from "node:fs";
 import { chromium, type BrowserContext, type Page } from "playwright";
 import { logger } from "../utils/logger.js";
+import { safeErrorMessage } from "../core/errors.js";
 import { VOLATILE_STORAGE_TYPES } from "./storage-types.js";
 
 export interface BrowserOptions {
@@ -55,11 +56,12 @@ export async function launchBrowser(
       "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
   });
 
-  // Remove navigator.webdriver flag
-  await context.addInitScript(() => {
-    Object.defineProperty(navigator, "webdriver", {
-      get: () => undefined,
-    });
+  // Remove navigator.webdriver flag. Passed as a string, not a function, so no
+  // transform (tsx/esbuild keepNames injecting `__name`) can ever touch the code
+  // that runs in the page – a broken init script would fail silently.
+  await context.addInitScript({
+    content:
+      "Object.defineProperty(navigator, 'webdriver', { get: () => undefined });",
   });
 
   const page = context.pages()[0] ?? (await context.newPage());
@@ -118,7 +120,7 @@ export async function clearVolatileBrowserState(
     logger.debug(`Cleared volatile browser state for ${origin}`);
   } catch (err) {
     logger.warn(
-      `Failed to clear volatile browser state for ${origin}: ${err instanceof Error ? err.message : String(err)}`,
+      `Failed to clear volatile browser state for ${origin}: ${safeErrorMessage(err)}`,
     );
   } finally {
     if (cdp) {
