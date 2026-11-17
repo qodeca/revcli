@@ -8,6 +8,7 @@ import { logger } from "../utils/logger.js";
 import { writeOutput } from "../output/write.js";
 import { scrapeLocation } from "../scraper/scrape-location.js";
 import { withRetry } from "../core/retry.js";
+import { safeErrorMessage } from "../core/fatal.js";
 import { RateLimiter } from "../core/rate-limiter.js";
 import { BatchProgress } from "../utils/progress.js";
 import type { SortOrder, OutputFormat } from "../core/schema.js";
@@ -109,9 +110,8 @@ export async function batchCommand(
       await writeFile(tmpFile, JSON.stringify(state, null, 2));
       await rename(tmpFile, stateFile);
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : String(error);
-      progress.failure(url, message);
+      // Call log removed: Playwright errors can print element markup.
+      progress.failure(url, safeErrorMessage(error));
     }
   }
 

@@ -9,6 +9,7 @@ import {
   authLogoutCommand,
 } from "./commands/auth.js";
 import { setVerbose } from "./utils/logger.js";
+import { reportFatalError } from "./core/fatal.js";
 import { SORT_ORDERS, OUTPUT_FORMATS } from "./core/schema.js";
 import type { SortOrder, OutputFormat } from "./core/schema.js";
 
@@ -164,4 +165,6 @@ auth
     await authLogoutCommand();
   });
 
-program.parse();
+// parseAsync so errors from async actions reach one handler: print the message
+// once, no stack trace (debug level only), exit code 1.
+program.parseAsync().catch(reportFatalError);

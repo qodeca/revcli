@@ -5,7 +5,22 @@ import {
   buildCardSelector,
   shouldFallbackLang,
   resolveOriginalLanguage,
+  formatTruncationWarning,
 } from "../src/scraper/extractor.js";
+
+describe("formatTruncationWarning", () => {
+  it("uses the singular noun for a single collected review", () => {
+    expect(formatTruncationWarning(1, 1)).toBe(
+      'Could not expand the full text of 1 of 1 collected review – their text may be cut off (ends with "…").',
+    );
+  });
+
+  it("uses the plural noun for several collected reviews", () => {
+    expect(formatTruncationWarning(3, 300)).toBe(
+      'Could not expand the full text of 3 of 300 collected reviews – their text may be cut off (ends with "…").',
+    );
+  });
+});
 
 describe("isShowingTranslation", () => {
   it("is true when aria-checked is 'true'", () => {

@@ -4,6 +4,9 @@ import {
   extractPlaceIdFromUrl,
   placeIdsMatch,
   canVerifyPlaceIdFormat,
+  isSearchResultsUrl,
+  isShortLinkUrl,
+  SHORT_LINK_HOST,
 } from "../utils/url.js";
 import type { Business, SortOrder } from "../core/schema.js";
 import { logger } from "../utils/logger.js";
@@ -12,7 +15,7 @@ import { SELECTORS } from "./selectors.js";
 import { clearVolatileBrowserState } from "./browser.js";
 import { handleConsent, ensureEnglishLocale, appendHlParam } from "./consent.js";
 import { extractBusinessInfo } from "./business-extractor.js";
-import { hasLimitedView } from "./auth.js";
+import { authRequiredError, hasLimitedView } from "./auth.js";
 
 const SORT_OPTIONS: Record<SortOrder, number> = {
   relevant: 0,
@@ -30,10 +33,58 @@ const SHORT_SETTLE_MS = 1000;
 const SCROLL_SETTLE_MS = 1500;
 const SORT_CLICK_TIMEOUT_MS = 5000;
 const SORT_MENU_TIMEOUT_MS = 3000;
+/** Extra wait for the sort menu once the sign-in dialog showed up first. */
+const SORT_MENU_GRACE_MS = 500;
 const SORT_ANNOUNCE_TIMEOUT_MS = 5000;
+const TAB_TIMEOUT_MS = 10000;
+
+/**
+ * Message M3. Deliberately does not echo the URL: batch already prints it next
+ * to each failure, and for Place ID input the built URL would be misleading.
+ */
+export const NOT_A_PLACE_MESSAGE =
+  "This link opened a Google Maps search results page, not a single place. Open the place in Google Maps, copy its link (Share → Copy link) and run the command again.";
 
 async function acceptDialog(dialog: Dialog): Promise<void> {
   await dialog.accept();
+}
+
+/**
+ * Called when the place panel (h1 or tabs) did not appear in time. A search
+ * results URL means the link is not a place: fail once with M3. Anything else
+ * is rethrown unchanged so real network flakiness is still retried.
+ */
+function notAPlaceOr(err: unknown, page: Page): never {
+  if (isSearchResultsUrl(page.url())) {
+    throw new UnrecoverableError("NOT_A_PLACE", NOT_A_PLACE_MESSAGE);
+  }
+  throw err;
+}
+
+/** Throw AUTH_REQUIRED when Google shows the limited-view banner. */
+async function throwIfLimitedView(page: Page): Promise<void> {
+  if (await hasLimitedView(page)) {
+    logger.debug("Limited view banner detected");
+    throw authRequiredError();
+  }
+}
+
+/**
+ * Wait until a short link (maps.app.goo.gl) has redirected to its destination.
+ * Google redirects these links in page script, not with an HTTP 3xx, so the
+ * `domcontentloaded` of `page.goto` can fire on the short-link page itself.
+ * A timeout is left to the place-panel wait below, which reports it.
+ */
+async function waitForShortLinkRedirect(page: Page): Promise<void> {
+  if (!isShortLinkUrl(page.url())) return;
+  await page
+    .waitForURL((url) => url.hostname !== SHORT_LINK_HOST, {
+      waitUntil: "domcontentloaded",
+      timeout: PAGE_LOAD_TIMEOUT_MS,
+    })
+    .catch(() => {
+      logger.debug("Short link did not redirect in time");
+    });
 }
 
 export async function navigateToReviews(
@@ -55,22 +106,35 @@ export async function navigateToReviews(
   // intact. See issue #4.
   await clearVolatileBrowserState(page, GOOGLE_MAPS_ORIGIN);
 
-  // Google Maps' SPA keeps polling, so `networkidle` is never reached and a
-  // short URL (redirected via HTTP 3xx) times out after 30s. `domcontentloaded`
-  // resolves once the redirect target's DOM is loaded; the `waitForSelector`
-  // below confirms the place panel is actually present.
+  // Google Maps' SPA keeps polling, so `networkidle` is never reached.
+  // `domcontentloaded` can fire before a short link's script redirect;
+  // `waitForShortLinkRedirect` below handles that, and the `waitForSelector`
+  // further down confirms the place panel is actually present.
   const waitUntil = "domcontentloaded";
   logger.debug(`Navigating to ${targetUrl}`);
   await page.goto(targetUrl, { waitUntil, timeout: PAGE_LOAD_TIMEOUT_MS });
+
+  // A short link redirects in page script, so `goto` can resolve while the
+  // page is still on maps.app.goo.gl. Wait for the real destination first:
+  // forcing hl=en on the short link itself is lost in the redirect.
+  await waitForShortLinkRedirect(page);
 
   // Handle Google consent page
   await handleConsent(page);
 
   // Force English locale if consent redirect stripped hl=en
-  await ensureEnglishLocale(page);
+  // The destination of a short link still carries entry/g_ep (they could not
+  // be stripped before the load), so strip them here in that case only. The
+  // flag follows the input, not the redirect timing, so a slow redirect that
+  // lands later is still covered.
+  await ensureEnglishLocale(page, { stripLimitedViewParams: parsed.isShortUrl });
 
-  // Wait for the place panel to load
-  await page.waitForSelector("h1", { timeout: REVIEW_PANEL_TIMEOUT_MS });
+  // Wait for the place panel to load. Search results pages have no h1.
+  try {
+    await page.waitForSelector("h1", { timeout: REVIEW_PANEL_TIMEOUT_MS });
+  } catch (err) {
+    notAPlaceOr(err, page);
+  }
 
   // Extract placeId from the resolved URL (useful for short URLs)
   const resolvedUrl = page.url();
@@ -143,15 +207,21 @@ async function scrollReviewsIntoView(page: Page): Promise<void> {
   await page.waitForTimeout(SCROLL_SETTLE_MS);
 }
 
+/**
+ * Open the Reviews tab and wait for the first review cards. Throws
+ * AUTH_REQUIRED when the limited-view banner is shown – checked once after the
+ * tabs appear and again after the cards appear, because the banner can render
+ * late (and with sort "relevant" there is no Sort click to catch it).
+ */
 async function openReviewsTab(page: Page): Promise<void> {
-  await page.waitForSelector(SELECTORS.tab, { timeout: 10000 });
+  try {
+    await page.waitForSelector(SELECTORS.tab, { timeout: TAB_TIMEOUT_MS });
+  } catch (err) {
+    notAPlaceOr(err, page);
+  }
   await page.waitForTimeout(SHORT_SETTLE_MS);
 
-  // Check for limited view before attempting to find Reviews tab
-  if (await hasLimitedView(page)) {
-    logger.warn("Limited view detected – Reviews tab is hidden");
-    return;
-  }
+  await throwIfLimitedView(page);
 
   // Content-based tab detection – find the tab containing "Review" text
   const tabs = page.locator(SELECTORS.tab);
@@ -189,6 +259,8 @@ async function openReviewsTab(page: Page): Promise<void> {
 
   await page.waitForSelector(SELECTORS.reviewCard, { timeout: REVIEW_PANEL_TIMEOUT_MS });
   await page.waitForTimeout(SHORT_SETTLE_MS);
+
+  await throwIfLimitedView(page);
   logger.debug("Reviews panel loaded");
 }
 
@@ -209,9 +281,33 @@ export async function setSortOrder(page: Page, sortOrder: SortOrder): Promise<vo
   const sortButton = page.locator(SELECTORS.sortButton);
   await sortButton.first().click({ timeout: SORT_CLICK_TIMEOUT_MS });
 
-  await page.waitForSelector(SELECTORS.sortMenuItem, { timeout: SORT_MENU_TIMEOUT_MS });
+  // In a limited view Sort opens a sign-in dialog instead of the menu. Wait for
+  // whichever becomes visible first (visible-filtered, so a hidden template
+  // item earlier in the DOM cannot stall the wait). A visible menu always
+  // wins: AUTH_REQUIRED only when the dialog is shown and no menu item is,
+  // even after a short grace for a menu that renders after the dialog.
+  const signInDialog = page.locator(SELECTORS.signInDialog);
+  const menuItems = page.locator(SELECTORS.sortMenuItem).filter({ visible: true });
+  await page
+    .locator(SELECTORS.sortMenuItem)
+    .or(signInDialog)
+    .filter({ visible: true })
+    .first()
+    .waitFor({ state: "visible", timeout: SORT_MENU_TIMEOUT_MS });
+  if ((await menuItems.count()) === 0) {
+    const menuAppeared = await menuItems
+      .first()
+      .waitFor({ state: "visible", timeout: SORT_MENU_GRACE_MS })
+      .then(
+        () => true,
+        () => false,
+      );
+    if (!menuAppeared && (await signInDialog.filter({ visible: true }).count()) > 0) {
+      logger.debug("Sort opened the sign-in dialog (limited view)");
+      throw authRequiredError();
+    }
+  }
 
-  const menuItems = page.locator(SELECTORS.sortMenuItem);
   const count = await menuItems.count();
   if (sortIndex >= count) {
     throw new UnrecoverableError(

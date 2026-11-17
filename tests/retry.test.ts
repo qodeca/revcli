@@ -1,5 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { withRetry } from "../src/core/retry.js";
+import { UnrecoverableError } from "../src/core/errors.js";
+import { logger } from "../src/utils/logger.js";
 
 describe("withRetry", () => {
   it("returns result on first success", async () => {
@@ -55,6 +57,29 @@ describe("withRetry", () => {
       withRetry(fn, "test", { maxRetries: 3, baseDelayMs: 10 }),
     ).rejects.toThrow("Executable");
     expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not retry a typed AUTH_REQUIRED error", async () => {
+    const fn = vi
+      .fn()
+      .mockRejectedValue(new UnrecoverableError("AUTH_REQUIRED", "limited view"));
+    await expect(
+      withRetry(fn, "test", { maxRetries: 3, baseDelayMs: 10 }),
+    ).rejects.toThrow("limited view");
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not log an UnrecoverableError at error level (the caller prints it once)", async () => {
+    const errorSpy = vi.spyOn(logger, "error");
+    try {
+      const fn = vi.fn().mockRejectedValue(new UnrecoverableError("NOT_A_PLACE", "search page"));
+      await expect(
+        withRetry(fn, "test", { maxRetries: 3, baseDelayMs: 10 }),
+      ).rejects.toThrow("search page");
+      expect(errorSpy).not.toHaveBeenCalled();
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 
   it("wraps non-Error throwables", async () => {

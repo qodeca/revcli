@@ -1,5 +1,5 @@
 import { logger } from "../utils/logger.js";
-import { UnrecoverableError } from "./errors.js";
+import { UnrecoverableError, safeErrorMessage } from "./errors.js";
 
 export interface RetryOptions {
   maxRetries: number;
@@ -33,9 +33,11 @@ export async function withRetry<T>(
 
       if (attempt === opts.maxRetries) break;
 
-      // Don't retry on known unrecoverable errors
+      // Don't retry on known unrecoverable errors. Debug level only: the caller
+      // (top-level handler, or batch's per-location failure line) prints the
+      // message once.
       if (isUnrecoverable(lastError)) {
-        logger.error(`${label}: unrecoverable error – ${lastError.message}`);
+        logger.debug(`${label}: unrecoverable error – ${safeErrorMessage(lastError)}`);
         throw lastError;
       }
 
