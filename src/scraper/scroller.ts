@@ -6,6 +6,7 @@ import {
   expandAllReviews,
   extractReviews,
   formatTruncationWarning,
+  markCollected,
   restoreTranslations,
   type RawReview,
 } from "./extractor.js";
@@ -33,6 +34,28 @@ interface CycleState {
 export interface ScrollOptions {
   maxReviews?: number;
   delayMs: number;
+  /**
+   * Epoch ms after which scrolling stops and the reviews collected so far are
+   * returned (a partial result, with a warning). Undefined = no time limit.
+   */
+  deadline?: number;
+  /**
+   * Called after every collect cycle (the work between two scrolls, waits
+   * excluded). For timing diagnostics and tests; never changes collection.
+   */
+  onCycle?: (cycle: CycleTiming) => void;
+}
+
+/** Timing of one collect cycle, reported through `ScrollOptions.onCycle`. */
+export interface CycleTiming {
+  /** Time spent restoring, expanding, extracting and collecting, in ms. */
+  durationMs: number;
+  /** Reviews newly collected in this cycle. */
+  newCount: number;
+  /** Reviews collected so far. */
+  total: number;
+  /** Review cards read from the page in this cycle (collected cards are skipped). */
+  readCount: number;
 }
 
 /** Collection state shared by every collect call within one scrape. */
@@ -44,6 +67,8 @@ interface CollectContext {
   restoreFailedIds: Set<string>;
   /** Collected reviews whose card still had a pending "More" button when read. */
   truncatedIds: Set<string>;
+  /** Cards read from the page so far in the current cycle (for CycleTiming). */
+  readCount: number;
 }
 
 /**
@@ -116,6 +141,7 @@ export async function scrollAndCollectReviews(
     maxReviews: options.maxReviews,
     restoreFailedIds: new Set<string>(),
     truncatedIds: new Set<string>(),
+    readCount: 0,
   };
 
   const scrollContainer = await findScrollContainer(page);
@@ -178,7 +204,8 @@ async function collectOnce(page: Page, ctx: CollectContext): Promise<number> {
   for (const id of capture.restoreFailedIds) ctx.restoreFailedIds.add(id);
   const enriched = enrichReviews(rawReviews, capture.results);
 
-  const before = new Set(ctx.collectedIds);
+  // Ids among the cards just read that were collected before this call.
+  const before = new Set(collectedIdsIn(rawReviews, ctx));
   const newCount = collectNewReviews(
     enriched,
     ctx.collectedIds,
@@ -194,7 +221,17 @@ async function collectOnce(page: Page, ctx: CollectContext): Promise<number> {
       ctx.truncatedIds.add(r.reviewId);
     }
   }
+  ctx.readCount += rawReviews.length;
+  // Mark every card read here whose review is now collected (new ones, and
+  // re-rendered cards of reviews collected earlier), so later cycles skip them
+  // and a cycle's cost stays flat as the list grows (issue #33).
+  await markCollected(page, collectedIdsIn(rawReviews, ctx));
   return newCount;
+}
+
+/** Ids of the given cards whose review is in the collected set. */
+function collectedIdsIn(rawReviews: RawReview[], ctx: CollectContext): string[] {
+  return rawReviews.filter((r) => ctx.collectedIds.has(r.reviewId)).map((r) => r.reviewId);
 }
 
 /**
@@ -202,7 +239,9 @@ async function collectOnce(page: Page, ctx: CollectContext): Promise<number> {
  * collect path goes through here so no card is collected unexpanded.
  */
 async function expandAndCollect(page: Page, ctx: CollectContext): Promise<number> {
-  await expandAllReviews(page, ctx.collectedIds);
+  // Collected cards carry COLLECTED_MARK_ATTR and are skipped in the page, so
+  // the collected-id list is not sent on every call (it grew with the list).
+  await expandAllReviews(page);
   return collectOnce(page, ctx);
 }
 
@@ -274,50 +313,81 @@ async function collectFromCurrentSort(
   options: ScrollOptions,
 ): Promise<void> {
   let state: CycleState = { staleScrollCount: 0, spinnerWithoutProgressCount: 0 };
+  let cycle = 0;
 
   while (true) {
-    // Re-toggle any card left showing its original language so extractReviews
-    // never reads a stale original text as `text`.
-    if (ctx.restoreFailedIds.size > 0) {
-      await restoreTranslations(page, ctx.restoreFailedIds);
-    }
-
-    const newCount = await expandAndCollect(page, ctx);
-
-    if (newCount === -1) {
-      logger.info(`Reached max reviews limit (${options.maxReviews})`);
-      return;
-    }
-
-    let decision: { state: CycleState; stop: boolean };
-    if (newCount > 0) {
-      logger.debug(`+${newCount} new reviews (total: ${ctx.reviews.length})`);
-      decision = decideCycle(newCount, false, state);
-    } else {
-      const loading = await isLoadingVisible(page);
-      if (loading) {
-        const retryNewCount = await retryAfterLoading(page, ctx);
-        if (retryNewCount === -1) {
-          logger.info(`Reached max reviews limit (${options.maxReviews})`);
-          return;
-        }
-        if (retryNewCount > 0) {
-          logger.debug(
-            `+${retryNewCount} new reviews after loading (total: ${ctx.reviews.length})`,
-          );
-        }
-        decision = decideCycle(retryNewCount, true, state);
-      } else {
-        decision = decideCycle(0, false, state);
-      }
-    }
-    state = decision.state;
-
-    if (decision.stop) {
-      logger.info(
-        `No new reviews after scrolling – no more reviews available (${ctx.reviews.length} total)`,
+    cycle += 1;
+    const cycleStart = Date.now();
+    const totalBefore = ctx.reviews.length;
+    ctx.readCount = 0;
+    const reportCycle = (): void => {
+      const timing: CycleTiming = {
+        durationMs: Date.now() - cycleStart,
+        newCount: ctx.reviews.length - totalBefore,
+        total: ctx.reviews.length,
+        readCount: ctx.readCount,
+      };
+      logger.debug(
+        `Collect cycle ${cycle}: +${timing.newCount} (total ${timing.total}, ${timing.readCount} cards read) in ${timing.durationMs}ms`,
       );
-      return;
+      options.onCycle?.(timing);
+    };
+
+    // Timed from here to the scroll; the finally reports every exit path.
+    try {
+      // Re-toggle any card left showing its original language so extractReviews
+      // never reads a stale original text as `text`.
+      if (ctx.restoreFailedIds.size > 0) {
+        await restoreTranslations(page, ctx.restoreFailedIds);
+      }
+
+      const newCount = await expandAndCollect(page, ctx);
+
+      if (newCount === -1) {
+        logger.info(`Reached max reviews limit (${options.maxReviews})`);
+        return;
+      }
+
+      // Checked after a collect, so the reviews already on screen are kept.
+      if (options.deadline != null && Date.now() >= options.deadline) {
+        logger.warn(
+          `Time limit reached – stopping with ${ctx.reviews.length} reviews collected (partial result)`,
+        );
+        return;
+      }
+
+      let decision: { state: CycleState; stop: boolean };
+      if (newCount > 0) {
+        logger.debug(`+${newCount} new reviews (total: ${ctx.reviews.length})`);
+        decision = decideCycle(newCount, false, state);
+      } else {
+        const loading = await isLoadingVisible(page);
+        if (loading) {
+          const retryNewCount = await retryAfterLoading(page, ctx);
+          if (retryNewCount === -1) {
+            logger.info(`Reached max reviews limit (${options.maxReviews})`);
+            return;
+          }
+          if (retryNewCount > 0) {
+            logger.debug(
+              `+${retryNewCount} new reviews after loading (total: ${ctx.reviews.length})`,
+            );
+          }
+          decision = decideCycle(retryNewCount, true, state);
+        } else {
+          decision = decideCycle(0, false, state);
+        }
+      }
+      state = decision.state;
+
+      if (decision.stop) {
+        logger.info(
+          `No new reviews after scrolling – no more reviews available (${ctx.reviews.length} total)`,
+        );
+        return;
+      }
+    } finally {
+      reportCycle();
     }
 
     await scrollDown(page, scrollContainer);
