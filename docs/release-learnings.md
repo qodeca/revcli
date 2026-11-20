@@ -137,9 +137,10 @@ predicted, and every deviation is worth knowing.
 - The web-auth page requires a **security key / passkey**, so this step cannot be
   automated end to end; a human must approve it.
 
-### 4.2 Registry propagation after a first publish
+### 4.2 Registry propagation after a publish
 
-For a brand-new scoped package, the registry is **not** immediately consistent:
+The registry is **not** immediately consistent after a publish. The first publish (0.1.3, a
+brand-new scoped package):
 
 | Endpoint | Right after publish | ~2 minutes later |
 |---|---|---|
@@ -147,9 +148,22 @@ For a brand-new scoped package, the registry is **not** immediately consistent:
 | `GET /@scope%2Fname/<version>` | 200 | 200 |
 | `GET /@scope%2Fname/-/name-<version>.tgz` | 200 | 200 |
 
-`npm install` and `npm view` read the **packument**, so both fail during the gap. Do not
-conclude a publish failed because `npm view` 404s — check the version endpoint or the
-tarball, or the npmjs.com package page.
+A later publish (0.2.0, 2026-11-20), timed from npm's "Your package is being processed":
+
+| Endpoint | 404 for | Then |
+|---|---|---|
+| `GET /@scope%2Fname` (packument, `latest`) | ~4 minutes (`latest` stayed on 0.1.5) | 200 |
+| `GET /@scope%2Fname/<version>` | ~4 minutes | 200 |
+| `GET /@scope%2Fname/-/name-<version>.tgz` | ~8 minutes | 200 |
+
+So the lag is not limited to a first publish, and the version endpoint and tarball are not
+always ahead of the packument. `npm view` reads the packument and `npm install` also fetches
+the tarball, so both fail during the gap. Do not conclude a publish failed because they 404:
+poll until the version endpoint **and** the tarball return 200, or check the npmjs.com
+package page. On 0.2.0 the ~110 s post-publish check (§4.3) failed again on a successful
+publish: `release.mjs` exits before it writes `published=true`, so the workflow skipped the
+GitHub Release and the bump-branch deletion, and both were done by hand per the runbook's
+troubleshooting table.
 
 ### 4.3 The post-publish check races the registry
 
@@ -159,9 +173,10 @@ the failure mode the review warned about (findings 12 and 19): a red job on a sh
 release, which in the workflow skips the tag/Release step and leaves `main`'s manifest behind
 the registry.
 
-**Fixed:** the check now polls `dist-tags` up to 12 times at 10 s intervals before declaring
-failure, and its failure message states that the publish may have succeeded so nobody
-re-dispatches.
+**Mitigated, not solved:** the check now polls `dist-tags` up to 12 times at 10 s intervals
+(about 110 s) before declaring failure, and its failure message states that the publish may
+have succeeded so nobody re-dispatches. That window was too short for 0.2.0 (§4.2), where
+`latest` took about 4 minutes to move.
 
 ### 4.4 GitHub Actions
 

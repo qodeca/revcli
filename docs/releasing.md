@@ -214,13 +214,13 @@ script's header: it cannot fail open on a malformed payload. The practical rule 
 ```bash
 V=0.1.4   # the version you released
 
-# authoritative and immediately consistent — use this if `npm view` lags
+# version endpoint — can lag minutes; see "The registry is eventually consistent"
 curl -s "https://registry.npmjs.org/@qodeca%2Frevcli/$V" | node -e "
   let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const d=JSON.parse(s);
   console.log('version:',d.version,'| license:',d.license,'| files:',d.dist.fileCount);
   console.log('provenance:',Boolean(d.dist.attestations&&d.dist.attestations.provenance));})"
 
-# dist-tags (may lag a minute or two after a publish)
+# dist-tags (may lag several minutes after a publish)
 npm view @qodeca/revcli version dist-tags
 
 # the GitHub Release the workflow created
@@ -359,8 +359,8 @@ clean tree, and the version it ships carries **no provenance attestation**. Afte
 |---|---|---|
 | `EOTP` on publish / trust / logout | 2FA required | Re-run under `script -q /dev/null`, or pass `npm_config_otp` |
 | Web-auth URL is `https://www.npmjs.com/auth/cli/***` | Output redacted, or no TTY | Run under a pseudo-TTY; read the URL from the live terminal |
-| `release.mjs` "post-publish check failed … may have succeeded" | Registry lag (see below) | Do **not** re-dispatch — check the registry by hand, create the tag if missing |
-| `npm view` 404s but the npmjs.com page shows the version | Packument cache lag (~2 min) | Query the version endpoint instead: `/@qodeca%2Frevcli/<version>` |
+| `release.mjs` "post-publish check failed … may have succeeded" | Registry lag (see below) | Do **not** re-dispatch — if the publish log shows `Your package is being processed`, it was published. Wait for the registry (poll in "The registry is eventually consistent"), then follow "Release published but no tag/Release" and delete the bump branch by hand (`git push origin --delete release/vX.Y.Z`) — the workflow skipped both. Still 404 after ~15 min: check the npmjs.com package page and stop |
+| `npm view` 404s but the npmjs.com page shows the version | Packument cache lag (minutes) | Query the version endpoint instead: `/@qodeca%2Frevcli/<version>` |
 | Gate: "CI for … is still in_progress" | Dispatched too early | Wait for CI to finish, re-dispatch |
 | Gate: "concluded 'failure'" | CI red on that commit | Fix CI on `main`; the gate will never pass for that commit |
 | Gate: "No CI run found for … on main" | Commit landed with `[skip ci]`, or via `GITHUB_TOKEN` | Push a new commit and release that one |
@@ -374,11 +374,24 @@ clean tree, and the version it ships carries **no provenance attestation**. Afte
 
 ### The registry is eventually consistent
 
-For roughly two minutes after a publish, the **packument** (`GET /@qodeca%2Frevcli`) can 404
-while the **version endpoint** (`/@qodeca%2Frevcli/<version>`) and the **tarball** already
-return 200. `npm install` and `npm view` read the packument, so both fail during the window.
-`release.mjs` polls through it (12 checks, 10 s apart — about 110 s) before reporting failure. If you are checking by
-hand, the version endpoint and the tarball are authoritative.
+After a publish, the packument (`latest`), the version endpoint and the tarball catch up
+separately, in no fixed order, and for several minutes — up to ~8 min on 0.2.0 (measurements:
+[release-learnings.md §4.2](release-learnings.md#42-registry-propagation-after-a-publish)).
+`npm view` reads the packument and `npm install` also fetches the tarball, so both can fail
+on a version that is published. `release.mjs` polls `latest` for only about 110 s (12 checks,
+10 s apart), so its post-publish check can go red on a successful publish.
+
+Before you install-test or create a tag by hand, poll until both the version endpoint and the
+tarball return 200:
+
+```bash
+V=0.2.0
+for url in "https://registry.npmjs.org/@qodeca%2Frevcli/$V" \
+           "https://registry.npmjs.org/@qodeca/revcli/-/revcli-$V.tgz"; do
+  until [ "$(curl -s -o /dev/null -w '%{http_code}' "$url")" = 200 ]; do sleep 20; done
+  echo "200: $url"
+done
+```
 
 ---
 

@@ -82,4 +82,9 @@ trick for npm operations that need 2FA.
 Two rules resolve most incidents:
 
 1. Key every decision on **whether the registry changed**, not on whether the job went red.
-2. A published version with **no tag** means: do not re-run — create the Release by hand.
+   The registry can lag about 10 minutes after a publish: if the publish log shows
+   `Your package is being processed`, it was published — never re-dispatch; wait and
+   re-check (`../../../docs/releasing.md`, "The registry is eventually consistent").
+2. A published version with **no tag** means: do not re-run — follow the "Release published
+   but no tag/Release" row in `../../../docs/releasing.md`, and delete the `release/vX.Y.Z`
+   branch by hand.
