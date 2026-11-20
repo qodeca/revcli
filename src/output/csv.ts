@@ -1,4 +1,4 @@
-import { writeFile } from "node:fs/promises";
+import { writeFileAtomic } from "./atomic.js";
 import type { ScrapeResult } from "../core/schema.js";
 
 const CSV_HEADERS = [
@@ -57,7 +57,7 @@ export async function writeCsv(
   const csv = rows.join("\n") + "\n";
 
   if (outputPath) {
-    await writeFile(outputPath, csv, "utf-8");
+    await writeFileAtomic(outputPath, csv);
   } else {
     process.stdout.write(csv);
   }

@@ -1,6 +1,7 @@
 import type { Page } from "playwright";
 import { logger } from "../utils/logger.js";
 import { SELECTORS } from "./selectors.js";
+import { safeErrorMessage } from "../core/errors.js";
 
 // Named timeouts for the original-language toggle pass. Reduced from the old
 // 3000ms literals so a slow card does not stall the scroll-collect loop; the
@@ -17,6 +18,13 @@ const EXPAND_CONFIRM_TIMEOUT_MS = 1500;
 const EXPAND_MAX_PASSES = 2;
 /** Attribute that marks each pending "More" button with a per-pass token. */
 export const EXPAND_MARK_ATTR = "data-revcli-expand";
+/**
+ * Set on a review card once its review is collected, holding that review's id.
+ * Later cycles skip a card only while the mark equals the card's current id,
+ * so a card element Google reuses for another review is read again (issue #33:
+ * re-reading every card each cycle made collection slow down as it grew).
+ */
+export const COLLECTED_MARK_ATTR = "data-revcli-collected";
 /** Tokens are generated Node-side and interpolated into a selector, so pin their alphabet. */
 const EXPAND_TOKEN_RE = /^[a-z0-9-]+$/;
 
@@ -155,7 +163,7 @@ async function scanExpandButtons(
   opts: { skipIds: string[]; stamp: boolean; prefix: string },
 ): Promise<ExpandScanTarget[]> {
   return page.evaluate(
-    ({ cardSel, reviewIdSel, btnSel, attr, prefix, stamp, skipIds }) => {
+    ({ cardSel, reviewIdSel, btnSel, attr, collectedAttr, prefix, stamp, skipIds }) => {
       if (stamp) {
         for (const el of Array.from(document.querySelectorAll(`[${attr}]`))) {
           el.removeAttribute(attr);
@@ -170,6 +178,8 @@ async function scanExpandButtons(
         const reviewId =
           card.querySelector(reviewIdSel)?.getAttribute("data-review-id") || null;
         if (reviewId !== null && skip.has(reviewId)) continue;
+        // Already collected (and still showing the same review): skip.
+        if (reviewId !== null && card.getAttribute(collectedAttr) === reviewId) continue;
         for (const btn of Array.from(card.querySelectorAll(btnSel))) {
           const pending =
             btn.getClientRects().length > 0 &&
@@ -191,6 +201,7 @@ async function scanExpandButtons(
       reviewIdSel: SELECTORS.reviewId,
       btnSel: SELECTORS.expandButton,
       attr: EXPAND_MARK_ATTR,
+      collectedAttr: COLLECTED_MARK_ATTR,
       prefix: opts.prefix,
       stamp: opts.stamp,
       skipIds: opts.skipIds,
@@ -264,8 +275,11 @@ async function safeScan(
  * 3. Up to EXPAND_MAX_PASSES passes; later passes re-mark whatever is still
  *    pending (re-rendered cards, late buttons, failed clicks).
  *
- * `skipIds` should hold already-collected reviews so a stuck button costs at
- * most EXPAND_MAX_PASSES clicks in the cycle it appears in. The result is for
+ * Cards marked with COLLECTED_MARK_ATTR (already collected, same review) are
+ * always skipped, so the scroller passes no `skipIds`; a stuck button costs at
+ * most EXPAND_MAX_PASSES clicks per cycle until its card is collected and
+ * marked (again, for a card Google re-rendered). `skipIds` stays for callers
+ * that want to exclude reviews by id. The result is for
  * logging only – the truncation warning comes from `expandPending` at
  * extraction time.
  */
@@ -327,6 +341,7 @@ export async function extractReviews(page: Page): Promise<ExtractedReview[]> {
     responseContainer: SELECTORS.ownerResponseContainer,
     responseText: SELECTORS.ownerResponseText,
     responseTime: SELECTORS.ownerResponseTime,
+    collectedAttr: COLLECTED_MARK_ATTR,
   };
 
   const results = await page.evaluate((s) => {
@@ -351,6 +366,8 @@ export async function extractReviews(page: Page): Promise<ExtractedReview[]> {
       try {
         const reviewIdEl = card.querySelector(s.reviewId);
         const reviewId = reviewIdEl?.getAttribute("data-review-id") ?? "";
+        // Collected in an earlier cycle and still the same review: skip it.
+        if (reviewId && card.getAttribute(s.collectedAttr) === reviewId) continue;
 
         const authorEl = card.querySelector(s.authorName);
         const author = authorEl?.textContent?.trim() ?? "Anonymous";
@@ -473,8 +490,39 @@ export async function extractReviews(page: Page): Promise<ExtractedReview[]> {
     );
   }
 
-  logger.debug(`Extracted ${reviews.length} reviews from DOM`);
+  logger.debug(`Extracted ${reviews.length} not-yet-collected reviews from DOM`);
   return reviews;
+}
+
+/**
+ * Mark the cards of the given (collected) reviews with COLLECTED_MARK_ATTR so
+ * later cycles skip them. One in-page pass; ids are compared in the page, never
+ * built into a selector. Best-effort: a failed mark only means the card is
+ * read (and deduplicated) once more.
+ */
+export async function markCollected(page: Page, reviewIds: string[]): Promise<void> {
+  if (reviewIds.length === 0) return;
+  try {
+    await page.evaluate(
+      ({ cardSel, reviewIdSel, attr, ids }) => {
+        const wanted = new Set(ids);
+        for (const card of Array.from(document.querySelectorAll(cardSel))) {
+          const id = card.querySelector(reviewIdSel)?.getAttribute("data-review-id");
+          if (id && wanted.has(id) && card.getAttribute(attr) !== id) {
+            card.setAttribute(attr, id);
+          }
+        }
+      },
+      {
+        cardSel: SELECTORS.reviewCard,
+        reviewIdSel: SELECTORS.reviewId,
+        attr: COLLECTED_MARK_ATTR,
+        ids: reviewIds,
+      },
+    );
+  } catch (err) {
+    logger.debug(`Marking collected cards failed: ${safeErrorMessage(err)}`);
+  }
 }
 
 /**

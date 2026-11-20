@@ -103,6 +103,7 @@ Scrape reviews from a single Google Maps location.
 | `-f, --format <type>` | `json` | Output format. Choices: `json`, `csv` |
 | `--headless` | `false` | Hide the browser window. Browser shows by default so you can observe scraping and handle auth prompts |
 | `--delay <ms>` | `3000` | Delay in milliseconds between scroll actions. Increase if getting rate-limited |
+| `--time-limit <minutes>` | none | Stop collecting after this many minutes and save the reviews collected so far (a partial result, with a warning). Useful for places with thousands of reviews, where collection slows down as the list grows |
 | `-v, --verbose` | `false` | Enable debug-level logging |
 
 **Examples:**
@@ -139,7 +140,7 @@ Scrape reviews from multiple locations listed in a file. Produces one output fil
 | `--headless` | `false` | Hide the browser window |
 | `--delay <ms>` | `3000` | Delay in milliseconds between scroll actions within a location |
 | `--location-delay <ms>` | `10000` | Delay in milliseconds between locations. Increase to reduce rate-limiting risk |
-| `--location-timeout <ms>` | `300000` | Timeout per location in milliseconds (default: 5 minutes). Prevents indefinite hangs |
+| `--location-timeout <ms>` | `300000` | Timeout per location in milliseconds (default: 5 minutes). A place that runs longer is stopped and its browser closed, then the batch goes on with the next place (no file is saved for the stopped place). In headed mode, time spent signing in counts too |
 | `--resume` | `false` | Skip locations already scraped in a previous run. State tracked via `.revcli-state.json` in the output directory |
 | `-v, --verbose` | `false` | Enable debug-level logging |
 

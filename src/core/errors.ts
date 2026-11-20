@@ -7,13 +7,20 @@
  * - AUTH_POLL: interactive sign-in timed out or the window was closed
  * - AUTH_REQUIRED: Google Maps shows a limited view; `revcli auth` is needed
  * - NOT_A_PLACE: the link opened a search results page, not a single place
+ * - LOCATION_TIMEOUT: one place ran past `--location-timeout` and was stopped
+ * - BROWSER_NOT_CLOSED: a stopped place did not release its browser in time,
+ *   so no further browser may be started on the shared profile
+ * - SHUTDOWN: revcli received SIGHUP/SIGINT/SIGTERM and is closing
  */
 export type UnrecoverableKind =
   | "NAV_VERIFY"
   | "SORT_VERIFY"
   | "AUTH_POLL"
   | "AUTH_REQUIRED"
-  | "NOT_A_PLACE";
+  | "NOT_A_PLACE"
+  | "LOCATION_TIMEOUT"
+  | "BROWSER_NOT_CLOSED"
+  | "SHUTDOWN";
 
 /**
  * Typed error for failures that must NOT be retried by withRetry.

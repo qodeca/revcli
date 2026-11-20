@@ -1,6 +1,6 @@
 import type { ParsedUrl } from "../utils/url.js";
 import { logger } from "../utils/logger.js";
-import { launchBrowser, closeBrowser, trackBrowser } from "./browser.js";
+import { launchBrowser, withBrowserSession } from "./browser.js";
 import { navigateToReviews } from "./navigator.js";
 import { scrollAndCollectReviews } from "./scroller.js";
 import {
@@ -23,6 +23,8 @@ export interface ScrapeLocationOptions {
   maxReviews?: number;
   headless: boolean;
   delay: number;
+  /** Epoch ms after which review collection stops with a partial result. */
+  deadline?: number;
 }
 
 /**
@@ -113,38 +115,38 @@ export async function navigateWithAuthFallback<T>(
 export async function scrapeLocation(
   parsed: ParsedUrl,
   options: ScrapeLocationOptions,
+  signal?: AbortSignal,
 ): Promise<ScrapeResult> {
   const startTime = Date.now();
-  const { context, page } = await launchBrowser({
-    headless: options.headless,
-  });
-  trackBrowser(context);
+  // A timeout or shutdown closes the browser at once; every pending
+  // Playwright call then rejects and the session closes (issue #33).
+  return withBrowserSession(
+    () => launchBrowser({ headless: options.headless }),
+    signal,
+    async ({ page }) => {
+      const businessInfo: Omit<Business, "scrapeDate" | "headerTotalReviews"> =
+        await navigateWithAuthFallback({
+          headless: options.headless,
+          navigate: () => navigateToReviews(page, parsed, options.sort),
+          waitForAuth: () => waitForUserAuth(page),
+          sessionProbe: () => getSessionState(page, POLL_PROBE),
+        });
 
-  try {
-    const businessInfo: Omit<Business, "scrapeDate" | "headerTotalReviews"> =
-      await navigateWithAuthFallback({
-        headless: options.headless,
-        navigate: () => navigateToReviews(page, parsed, options.sort),
-        waitForAuth: () => waitForUserAuth(page),
-        sessionProbe: () =>
-          getSessionState(page, POLL_PROBE),
+      logger.info(
+        `Found: ${businessInfo.name} (header reports ${businessInfo.totalReviews ?? "?"} reviews)`,
+      );
+
+      const reviews: Review[] = await scrollAndCollectReviews(page, {
+        maxReviews: options.maxReviews,
+        delayMs: options.delay,
+        deadline: options.deadline,
       });
 
-    logger.info(
-      `Found: ${businessInfo.name} (header reports ${businessInfo.totalReviews ?? "?"} reviews)`,
-    );
-
-    const reviews: Review[] = await scrollAndCollectReviews(page, {
-      maxReviews: options.maxReviews,
-      delayMs: options.delay,
-    });
-
-    return assembleScrapeResult(businessInfo, reviews, {
-      scrapeDate: new Date().toISOString(),
-      scrapeDurationMs: Date.now() - startTime,
-      sortOrder: options.sort,
-    });
-  } finally {
-    await closeBrowser(context);
-  }
+      return assembleScrapeResult(businessInfo, reviews, {
+        scrapeDate: new Date().toISOString(),
+        scrapeDurationMs: Date.now() - startTime,
+        sortOrder: options.sort,
+      });
+    },
+  );
 }
