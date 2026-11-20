@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-20
+
 ### Fixed
 - Scrapes no longer crash after the first batch of reviews (`ReferenceError: SCROLL_STEP is not defined`).
 - Long reviews are fully expanded again. Google now removes the "More" button once clicked, which made every second review stay cut off at ~240 characters. If a review still cannot be expanded, the scrape warns how many reviews are affected.
@@ -51,7 +53,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - First public release to npm as `@qodeca/revcli`.
 
-[Unreleased]: https://github.com/qodeca/revcli/compare/v0.1.5...HEAD
+[Unreleased]: https://github.com/qodeca/revcli/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/qodeca/revcli/releases/tag/v0.2.0
 [0.1.5]: https://github.com/qodeca/revcli/releases/tag/v0.1.5
 [0.1.4]: https://github.com/qodeca/revcli/releases/tag/v0.1.4
 [0.1.3]: https://github.com/qodeca/revcli/releases/tag/v0.1.3
