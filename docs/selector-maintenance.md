@@ -51,6 +51,10 @@ Look for the repeating container element that wraps each review. Previously `div
 | **Scroll container** | Scrollable parent of review cards (4 fallbacks tried in order) | `div.m6QErb.DxyBCb.kA9KIf.dS8AEf` |
 | **Loading indicator** | Material Design spinner at bottom of scroll container during lazy-load (CSS animation state toggles paused/running) | `div.lXJj5c` |
 | **Sort live region** | ARIA live region announcing sort changes (e.g., "sorted from newest to oldest") | `div[aria-live="polite"][aria-atomic="true"]` |
+| **Account link** (`accountButton`) | Top-right account avatar link, shown when Google accepts the session. Matched by its `href`, which is language-independent; its `aria-label` is localized and holds the user's name and email, so never select by it or log it (see §7) | `a[href^="https://accounts.google.com/SignOutOptions"]` |
+| **Sign-in link** (`signInLink`) | Top-right "Sign in" link, shown when signed out **and** for a dead session that still has cookies (see §7) | `a[href^="https://accounts.google.com/ServiceLogin"]` |
+| **Sign-in dialog** (`signInDialog`) | Limited view only: clicking Sort opens "Sign-in to get the best of Google Maps" instead of the sort menu | `[role="dialog"][aria-label*="sign-in" i], [role="dialog"][aria-label*="sign in" i]` |
+| **Limited-view banner** (`TEXT_MARKERS.limitedViewBanner`) | Text marker, compared against lower-cased rendered text outside review cards: "You're seeing a limited view of Google Maps" | `limited view of google maps` |
 
 ### 4. Business header selectors
 
@@ -86,13 +90,21 @@ Run with `--verbose` and grep the log for the four `raw ...` lines and the `pars
 
 ### 5. Expand button lesson – do not use `:has-text("More")`
 
-The `expandButton` selector has gone through three revisions. Future maintainers editing this selector **must** read this section before reverting to a text-based fallback.
+The `expandButton` selector has gone through three revisions, and its call site through a fourth. Future maintainers editing this selector **must** read this section before reverting to a text-based fallback.
 
 **History:**
 1. **Original**: `'button.w8nwRe, button:has-text("More")'` used via `` page.locator(`${reviewCard} ${expandButton}`) `` – the template literal produced a flat CSS selector list where the comma made `button:has-text("More")` unscoped (CSS parses `A B, C` as `(A B), (C)`, not `(A B), (A C)`), so the second alternative matched buttons page-wide.
 2. **First fix** rewrote the call site to chain per-card locators (`cards.nth(i).locator(expandButton).first()`) which fixed the scope leak but introduced a per-card 500 ms click timeout bomb: every card without a match burned the full auto-wait before failing, producing 10–20 s delays per scroll iteration.
 3. **Second fix** collapsed into a single chained locator `page.locator(reviewCard).locator(expandButton)` – Playwright's chained API distributes scope across comma alternatives, so one locator query + fast `count()` iteration.
 4. **Third fix** (this section's motivation) dropped the text fallback entirely. `:has-text("X")` is a **case-insensitive substring match over descendant text content**. Reviewer names containing the letters "more" – `KHALID ALMORET`, Elmore, Moore, Latimore, Seymore, Dunmore, etc. – made author buttons match the fallback. Clicks on those author buttons opened a flood of new Local Guide profile tabs and disrupted the scroll state enough to plateau the scraper at ~790 reviews on places with a matching reviewer. Live DOM audit on a 820-card page found 150 `has-text("More")` matches in cards: 149 legitimate expand buttons, **1 rogue author button**.
+
+5. **Fourth fix** (2026-11, issue #31) changed the call site, not the selector. Google now **removes** the "More" button once it is clicked. The old loop took `count()` once and then clicked `nth(i)`: every removal shifted the remaining buttons down by one, so `nth(i)` skipped every second button and those reviews stayed cut off at ~240 characters. `expandAllReviews()` now uses **mark-and-confirm**:
+   - One `page.evaluate` scans every review card that has not been collected yet (the scroller passes its collected ids as `skipIds`, so a stuck button costs at most two clicks, once). Inside each card it uses `card.querySelectorAll(expandButton)` – card-scoped, so the comma list stays scoped – and picks the *pending* buttons: rendered (`getClientRects().length > 0`) and not `aria-expanded="true"`. Each one is stamped with `data-revcli-expand="<token>"` (Node-generated, `[a-z0-9-]` only; old stamps are cleared first).
+   - Each token is clicked by attribute, then a `waitForFunction` confirms the button is gone, disconnected, hidden, or `aria-expanded="true"`. The element itself is the identity, so removals cannot shift anything.
+   - A second pass re-stamps whatever is still pending (re-rendered cards, late buttons, failed clicks).
+   - The truncation warning ("Could not expand the full text of N of M collected reviews…") is counted at extraction time: `extractReviews()` flags each card that still has a pending button (`expandPending`, same predicate), and the scroller counts newly collected reviews with that flag. Reviews still cut off are collected anyway with the warning – deferring them risks losing the whole review when the virtualized list drops the card.
+
+   **Owner-response "More" buttons** match the same selector and are handled in the same pass. The confirm step accepts all three plausible reactions – removed, `aria-expanded="true"`, or hidden – and `tests/browser/expand.test.ts` covers each. Verified live on 2026-11-17: Google removes the owner-response button from the DOM on click, the same as the review-text button.
 
 **Current selector**: `button.w8nwRe, button[jsaction*="review.expand"]`
 
@@ -101,7 +113,7 @@ The `expandButton` selector has gone through three revisions. Future maintainers
 
 **General principle**: prefer semantic attributes (`jsaction`, `aria-label`, `data-*`, ARIA roles) over text content or obfuscated class names when writing selector fallbacks. Text is user data – reviewer names, review content, owner responses – and any substring match can collide with it.
 
-**Call-site reference**: `expandAllReviews()` in `src/scraper/extractor.ts`. The string-level regression guard is `tests/extractor-selectors.test.ts`.
+**Call-site reference**: `expandAllReviews()` in `src/scraper/extractor.ts`. The string-level regression guard is `tests/extractor-selectors.test.ts`; the behavioural guard (a fixture whose "More" buttons remove themselves) is `tests/browser/expand.test.ts`.
 
 ### 5b. Translated-review toggle lesson – the original text is NOT pre-rendered
 
@@ -134,6 +146,21 @@ Google automatically translates reviews written in a language other than the UI 
 - Use `document.querySelectorAll("NEW_SELECTOR")` in the DevTools console to verify matches
 - Check that the scroll container has `scrollHeight > clientHeight` – that confirms it's the right scrollable element
 
+### 7. Limited view and session markers (verified 2026-11-17)
+
+**Limited view.** Google shows signed-out EEA users – and profiles whose saved session has expired – a *limited view*:
+- The Reviews tab is **still present**, but only about 3–5 review cards load.
+- A banner reads "You're seeing a limited view of Google Maps. See more". `hasLimitedView()` matches `TEXT_MARKERS.limitedViewBanner` in rendered text only, skipping review cards (a review may quote the phrase), script/style content and hidden elements. `openReviewsTab()` checks **twice** – after the tabs appear and again after the review cards appear – because the banner can render late, and with sort `relevant` there is no Sort click to catch it.
+- Clicking Sort opens a "Sign-in to get the best of Google Maps" dialog instead of the menu. `setSortOrder()` waits for whichever of the menu items or `signInDialog` becomes visible first. A visible menu always wins; it fails with `AUTH_REQUIRED` only when the dialog is shown and no menu item appears (after a 0.5 s grace). With sort `relevant` there is no Sort click, so only the banner can signal the limited view.
+- Either signal throws `UnrecoverableError` kind `AUTH_REQUIRED`: headless runs stop with a "run `revcli auth`" message, headed runs ask the user to sign in and navigate again.
+
+**Session markers.** The top-right corner of any Maps page shows either the account link (`href` starting `https://accounts.google.com/SignOutOptions`) or the "Sign in" link (`href` starting `https://accounts.google.com/ServiceLogin`). Both hrefs are the same under `hl=en` and `hl=pl`; the aria-labels are localized ("Google Account: …" / "Konto Google: …") and the account label contains the user's name and email, so revcli matches hrefs only and never logs labels or Playwright error text.
+- A **dead session keeps its cookies** (`SID`, `HSID`, …) while Maps shows the "Sign in" link. Cookies alone therefore prove a session exists, not that Google accepts it; `getSessionState()` combines both and reports `expired`.
+- Google can render "Sign in" **briefly** before it confirms a valid session. With auth cookies present, a "Sign in" link must still be the only marker after a stability window to count: 3 s for `revcli auth` and `revcli auth status` (`SESSION_SIGN_IN_STABLE_MS`), 1.5 s inside the sign-in poll loop and for the scrape's error-wording check, which asks again on its next tick (`POLL_SIGN_IN_STABLE_MS`). The account link always wins.
+- No marker within the wait → `unconfirmed` (cookies trusted by `auth status` and `auth`, with a warning; the sign-in wait keeps polling).
+
+**Search results pages.** A link that does not resolve to one place (for example an old share link) lands on `/maps/search/…`: no `h1`, no place tabs, and the text may be in another language. Detection is by URL path only (`isSearchResultsUrl()`), and only after the `h1` or tab wait has timed out, because CID and some redirect links pass through `/maps/search/` on their way to `/maps/place/`. The result is `UnrecoverableError` kind `NOT_A_PLACE` after about 15 seconds, once.
+
 ## Updating selectors
 
 1. Edit `src/scraper/selectors.ts`
@@ -144,6 +171,7 @@ Google automatically translates reviews written in a language other than the UI 
    ```
 4. Verify reviews are extracted with correct fields (ratings, text, owner responses)
 5. Run `npm test` – existing tests for parser, schema, etc. should still pass
+6. Run `npm run test:browser`. The browser tests run the in-page code against a local fixture (`tests/browser/fixtures/maps-page.ts`) that mimics Google's DOM and behaviour. When Google's behaviour changes (not just a class name), update the fixture too, so the tests keep describing what Google actually does
 
 ## Stable vs fragile selectors
 
@@ -157,6 +185,7 @@ Google automatically translates reviews written in a language other than the UI 
 - `button[jsaction*="review.expand"]` – Google's internal action route (see "Expand button lesson")
 - `button[jsaction*="review.showReview"]` – Google's internal action route for the translated-review toggle (see "Translated-review toggle lesson")
 - `h1` – business name (standard HTML tag)
+- `a[href^="https://accounts.google.com/SignOutOptions"]` / `a[href^="https://accounts.google.com/ServiceLogin"]` – account / sign-in links, same in every UI language (see §7)
 
 **Fragile** (likely to change):
 - All single-class selectors: `.jftiEf`, `.d4r55`, `.kvMYJc`, `.rsqaWe`, `.wiI7pd`, `.CDe7pd`, `.DZSIDd`, `.DU9Pgb`, `.Tya61d`, `.w8nwRe`, `.lXJj5c`

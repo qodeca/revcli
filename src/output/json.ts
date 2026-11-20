@@ -1,4 +1,4 @@
-import { writeFile } from "node:fs/promises";
+import { writeFileAtomic } from "./atomic.js";
 import type { ScrapeResult } from "../core/schema.js";
 
 export async function writeJson(
@@ -8,7 +8,7 @@ export async function writeJson(
   const json = JSON.stringify(result, null, 2);
 
   if (outputPath) {
-    await writeFile(outputPath, json, "utf-8");
+    await writeFileAtomic(outputPath, json);
   } else {
     process.stdout.write(json + "\n");
   }

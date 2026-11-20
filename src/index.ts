@@ -9,6 +9,8 @@ import {
   authLogoutCommand,
 } from "./commands/auth.js";
 import { setVerbose } from "./utils/logger.js";
+import { reportFatalError } from "./core/fatal.js";
+import { installBrowserShutdown } from "./scraper/browser.js";
 import { SORT_ORDERS, OUTPUT_FORMATS } from "./core/schema.js";
 import type { SortOrder, OutputFormat } from "./core/schema.js";
 
@@ -50,6 +52,11 @@ program
     parsePositiveInt,
     3000,
   )
+  .option(
+    "--time-limit <minutes>",
+    "stop collecting after this many minutes and save the reviews collected so far",
+    parsePositiveInt,
+  )
   .option("-v, --verbose", "verbose logging", false)
   .action(async (url: string, opts) => {
     if (!(SORT_ORDERS as readonly string[]).includes(opts.sort)) {
@@ -66,6 +73,7 @@ program
       format: opts.format as OutputFormat,
       headless: opts.headless,
       delay: opts.delay,
+      timeLimit: opts.timeLimit,
     });
   });
 
@@ -164,4 +172,9 @@ auth
     await authLogoutCommand();
   });
 
-program.parse();
+// SIGHUP/SIGINT/SIGTERM close every browser and exit 129/130/143 (issue #33).
+installBrowserShutdown();
+
+// parseAsync so errors from async actions reach one handler: print the message
+// once, no stack trace (debug level only), exit code 1.
+program.parseAsync().catch(reportFatalError);

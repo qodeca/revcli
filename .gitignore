@@ -5,6 +5,7 @@ dist/
 /output/
 *.log
 coverage/
+.DS_Store
 
 # Local scratch. Never committed.
 .local/

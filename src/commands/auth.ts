@@ -8,13 +8,106 @@ import {
   PROFILE_DIR,
 } from "../scraper/browser.js";
 import {
-  isSignedIn,
-  hasLimitedView,
+  getSessionState,
   waitForSignIn,
   waitForBrowserClose,
+  SESSION_PROBE_TIMEOUT_MS,
+  type SessionState,
 } from "../scraper/auth.js";
 import { handleConsent } from "../scraper/consent.js";
-import { UnrecoverableError } from "../core/errors.js";
+
+const UNCONFIRMED_WARNING = `Google did not confirm the saved session within ${SESSION_PROBE_TIMEOUT_MS / 1000} seconds – trusting the saved cookies.`;
+const ALREADY_SIGNED_IN =
+  "Already signed in. The browser stays open so you can switch accounts – close the window when you're done.";
+const WAITING_FOR_SIGN_IN =
+  "Waiting for sign-in... The browser closes automatically once sign-in is detected (timeout: 5 minutes).";
+
+/** One line of command output. */
+export interface OutputLine {
+  level: "success" | "info" | "warn";
+  text: string;
+}
+
+/** What `revcli auth status` prints and exits with for a session state. */
+export interface StatusOutcome {
+  lines: OutputLine[];
+  exitCode: 0 | 1;
+}
+
+/** What `revcli auth` does for the session state it found at start-up. */
+export interface LoginPlan {
+  /**
+   * "wait-for-close": a real session – keep the window open until the user
+   * closes it (#24, account switching). "wait-for-sign-in": poll until sign-in
+   * is detected, then close.
+   */
+  action: "wait-for-close" | "wait-for-sign-in";
+  lines: OutputLine[];
+}
+
+/** Message M5 and exit code per state. Pure and exported for testability. */
+export function statusOutcome(state: SessionState): StatusOutcome {
+  switch (state) {
+    case "signed-in":
+      return {
+        lines: [{ level: "success", text: "Signed in to Google. Ready to scrape." }],
+        exitCode: 0,
+      };
+    case "unconfirmed":
+      return {
+        lines: [
+          { level: "success", text: "Signed in to Google. Ready to scrape." },
+          { level: "warn", text: UNCONFIRMED_WARNING },
+        ],
+        exitCode: 0,
+      };
+    case "expired":
+      return {
+        lines: [
+          {
+            level: "warn",
+            text: "Not signed in: the saved Google session has expired. Run: revcli auth",
+          },
+        ],
+        exitCode: 1,
+      };
+    case "signed-out":
+      return {
+        lines: [{ level: "warn", text: "Not signed in to Google. Run: revcli auth" }],
+        exitCode: 1,
+      };
+  }
+}
+
+/** The `revcli auth` start-up decision per state. Pure and exported for testability. */
+export function loginPlan(state: SessionState): LoginPlan {
+  switch (state) {
+    case "signed-in":
+      return { action: "wait-for-close", lines: [{ level: "info", text: ALREADY_SIGNED_IN }] };
+    case "unconfirmed":
+      return {
+        action: "wait-for-close",
+        lines: [
+          { level: "warn", text: UNCONFIRMED_WARNING },
+          { level: "info", text: ALREADY_SIGNED_IN },
+        ],
+      };
+    case "expired":
+      return {
+        action: "wait-for-sign-in",
+        lines: [
+          { level: "info", text: "The saved Google session has expired – sign in again." },
+          { level: "info", text: WAITING_FOR_SIGN_IN },
+        ],
+      };
+    case "signed-out":
+      return { action: "wait-for-sign-in", lines: [{ level: "info", text: WAITING_FOR_SIGN_IN }] };
+  }
+}
+
+function printLines(lines: OutputLine[]): void {
+  for (const { level, text } of lines) logger[level](text);
+}
 
 export async function authLoginCommand(): Promise<void> {
   logger.info("Opening Google Maps in Chrome...");
@@ -28,9 +121,8 @@ export async function authLoginCommand(): Promise<void> {
       timeout: 30000,
     });
     await handleConsent(page);
-    await page.waitForTimeout(3000);
 
-    const alreadySignedIn = await isSignedIn(page);
+    const state = await getSessionState(page);
 
     console.log(`
   Sign in to your Google account:
@@ -46,19 +138,16 @@ export async function authLoginCommand(): Promise<void> {
     // This command is the credential-entry step, so it must never short-circuit
     // on an existing session: the window has to stay open for the user to sign
     // in, switch accounts, or sign in again.
-    if (alreadySignedIn) {
-      logger.info(
-        "Already signed in. The browser stays open so you can switch accounts – close the window when you're done.",
-      );
+    const plan = loginPlan(state);
+    printLines(plan.lines);
+    if (plan.action === "wait-for-close") {
       await waitForBrowserClose(context);
       logger.success("Browser closed. Google session saved for later runs.");
       return;
     }
 
-    logger.info(
-      "Waiting for sign-in... The browser closes automatically once sign-in is detected (timeout: 5 minutes).",
-    );
-
+    // An AUTH_POLL timeout propagates to the top-level handler in index.ts,
+    // which prints its message once without a stack trace.
     const outcome = await waitForSignIn(context, page);
     if (outcome === "browser-closed") {
       logger.warn(
@@ -67,16 +156,6 @@ export async function authLoginCommand(): Promise<void> {
       return;
     }
     logger.success("Signed in to Google Maps. Session saved for later runs.");
-  } catch (err) {
-    // Commander does not await async action handlers, so an escaping
-    // UnrecoverableError (the 5-minute timeout) would surface as an unhandled
-    // rejection with a raw stack trace.
-    if (err instanceof UnrecoverableError) {
-      logger.error(err.message);
-      process.exitCode = 1;
-      return;
-    }
-    throw err;
   } finally {
     await closeBrowser(context);
   }
@@ -94,17 +173,10 @@ export async function authStatusCommand(): Promise<void> {
       timeout: 30000,
     });
     await handleConsent(page);
-    await page.waitForTimeout(3000);
 
-    const signedIn = await isSignedIn(page);
-    const limited = await hasLimitedView(page);
-
-    if (signedIn && !limited) {
-      logger.success("Signed in to Google Maps. Ready to scrape.");
-    } else {
-      logger.warn("Not signed in to Google. Run: revcli auth");
-      process.exitCode = 1;
-    }
+    const outcome = statusOutcome(await getSessionState(page));
+    printLines(outcome.lines);
+    if (outcome.exitCode !== 0) process.exitCode = outcome.exitCode;
   } finally {
     await closeBrowser(context);
   }

@@ -18,7 +18,13 @@ export interface ParsedUrl {
 const PLACE_ID_REGEX = /^ChIJ[A-Za-z0-9_-]{20,}$/;
 const GOOGLE_MAPS_LONG =
   /^https?:\/\/(www\.)?google\.[a-z.]+\/maps\/place\//;
-const GOOGLE_MAPS_SHORT = /^https?:\/\/maps\.app\.goo\.gl\//;
+/** Host of Google Maps share links (`https://maps.app.goo.gl/…`). */
+export const SHORT_LINK_HOST = "maps.app.goo.gl";
+const escapeRegExp = (text: string): string =>
+  text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const GOOGLE_MAPS_SHORT = new RegExp(
+  `^https?:\\/\\/${escapeRegExp(SHORT_LINK_HOST)}\\/`,
+);
 const GOOGLE_MAPS_CID = /^https?:\/\/(www\.)?google\.[a-z.]+\/maps\/?\?cid=/;
 const GOOGLE_MAPS_FTID =
   /^https?:\/\/(www\.)?google\.[a-z.]+\/maps\/?\?([^#]*&)?ftid=/;
@@ -117,6 +123,37 @@ export function extractPlaceIdFromUrl(url: string): string | null {
   if (placeMatch) return placeMatch[1];
 
   return null;
+}
+
+/**
+ * True when the URL is a Google Maps search results page (`/maps/search…`),
+ * which has no single place to scrape. Detection is by path only – Google may
+ * serve that page in any language. Callers check this only after the place
+ * panel failed to load, because CID and some redirect paths pass through
+ * `/maps/search/` on their way to `/maps/place/`. Unparseable input → false.
+ */
+export function isSearchResultsUrl(url: string): boolean {
+  let pathname: string;
+  try {
+    pathname = new URL(url).pathname;
+  } catch {
+    return false;
+  }
+  try {
+    pathname = decodeURIComponent(pathname);
+  } catch {
+    // Malformed escape – match against the raw path.
+  }
+  return pathname === "/maps/search" || pathname.startsWith("/maps/search/");
+}
+
+/** True when the URL is on Google's short-link host. Unparseable input → false. */
+export function isShortLinkUrl(url: string): boolean {
+  try {
+    return new URL(url).hostname === SHORT_LINK_HOST;
+  } catch {
+    return false;
+  }
 }
 
 export function isGoogleMapsUrl(input: string): boolean {

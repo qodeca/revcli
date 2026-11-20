@@ -1,6 +1,26 @@
 import { describe, it, expect } from "vitest";
 import { isUnrecoverable } from "../src/core/retry.js";
-import { UnrecoverableError } from "../src/core/errors.js";
+import { UnrecoverableError, hasUnrecoverableKind } from "../src/core/errors.js";
+
+describe("hasUnrecoverableKind", () => {
+  it("is true for an UnrecoverableError of the given kind", () => {
+    expect(
+      hasUnrecoverableKind(new UnrecoverableError("AUTH_REQUIRED", "x"), "AUTH_REQUIRED"),
+    ).toBe(true);
+  });
+
+  it("is false for an UnrecoverableError of another kind", () => {
+    expect(
+      hasUnrecoverableKind(new UnrecoverableError("NOT_A_PLACE", "x"), "AUTH_REQUIRED"),
+    ).toBe(false);
+  });
+
+  it("is false for plain errors and non-errors", () => {
+    expect(hasUnrecoverableKind(new Error("AUTH_REQUIRED"), "AUTH_REQUIRED")).toBe(false);
+    expect(hasUnrecoverableKind("AUTH_REQUIRED", "AUTH_REQUIRED")).toBe(false);
+    expect(hasUnrecoverableKind(undefined, "AUTH_REQUIRED")).toBe(false);
+  });
+});
 
 describe("isUnrecoverable", () => {
   it("detects 'invalid input'", () => {
@@ -50,6 +70,11 @@ describe("isUnrecoverable", () => {
       ),
     ).toBe(true);
     expect(isUnrecoverable(new UnrecoverableError("SORT_VERIFY", ""))).toBe(true);
+  });
+
+  it("detects the AUTH_REQUIRED and NOT_A_PLACE kinds", () => {
+    expect(isUnrecoverable(new UnrecoverableError("AUTH_REQUIRED", "limited view"))).toBe(true);
+    expect(isUnrecoverable(new UnrecoverableError("NOT_A_PLACE", "search page"))).toBe(true);
   });
 
   it("matches the exact navigation verification error template thrown by navigator.ts", () => {

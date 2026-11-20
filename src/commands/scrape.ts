@@ -3,6 +3,7 @@ import { logger } from "../utils/logger.js";
 import { writeOutput } from "../output/write.js";
 import { scrapeLocation } from "../scraper/scrape-location.js";
 import { withRetry } from "../core/retry.js";
+import { shutdownSignal } from "../core/shutdown.js";
 
 import type { SortOrder, OutputFormat } from "../core/schema.js";
 
@@ -13,6 +14,8 @@ export interface ScrapeOptions {
   format: OutputFormat;
   headless: boolean;
   delay: number;
+  /** Minutes after which collection stops and the reviews so far are saved. */
+  timeLimit?: number;
 }
 
 export async function scrapeCommand(
@@ -23,6 +26,8 @@ export async function scrapeCommand(
   logger.info(`Scraping reviews from: ${parsed.url}`);
 
   const startTime = Date.now();
+  const deadline =
+    options.timeLimit != null ? startTime + options.timeLimit * 60_000 : undefined;
 
   const result = await withRetry(
     () =>
@@ -31,9 +36,11 @@ export async function scrapeCommand(
         maxReviews: options.maxReviews,
         headless: options.headless,
         delay: options.delay,
-      }),
+        deadline,
+      }, shutdownSignal),
     "scrape",
-    { maxRetries: 2 },
+    // A signal stops the scrape without retries (issue #33).
+    { maxRetries: 2, signal: shutdownSignal },
   );
 
   await writeOutput(result, options.output ?? null, options.format);

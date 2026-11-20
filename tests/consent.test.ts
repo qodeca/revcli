@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { appendHlParam } from "../src/scraper/consent.js";
+import { appendHlParam, englishLocaleTarget } from "../src/scraper/consent.js";
 import { extractPlaceIdFromUrl } from "../src/utils/url.js";
 
 describe("appendHlParam", () => {
@@ -66,5 +66,58 @@ describe("appendHlParam", () => {
     // decodes percent-encoded chars before matching
     const placeId = extractPlaceIdFromUrl(result);
     expect(placeId).toBe("0x3e2ee3641f7016d7:0x8e3a8bcf52dad296");
+  });
+});
+
+describe("appendHlParam short-link detection", () => {
+  it("rewrites a normal Maps link that only mentions the short-link host in its query", () => {
+    const out = appendHlParam("https://www.google.com/maps/place/Test/@0,0,15z?ref=maps.app.goo.gl");
+    expect(new URL(out).searchParams.get("hl")).toBe("en");
+  });
+});
+
+describe("englishLocaleTarget", () => {
+  const params = (url: string | null) => new URL(url ?? "about:blank").searchParams;
+
+  it("returns null for an English URL without limited-view params", () => {
+    expect(englishLocaleTarget("https://www.google.com/maps/place/Test/@0,0,15z?hl=en")).toBeNull();
+  });
+
+  it("forces hl=en when hl is missing or another language", () => {
+    for (const url of [
+      "https://www.google.com/maps/place/Test/@0,0,15z",
+      "https://www.google.com/maps/place/Test/@0,0,15z?hl=pl",
+      "https://www.google.com/maps/place/Test/@0,0,15z?hl=en-GB",
+    ]) {
+      expect(params(englishLocaleTarget(url)).get("hl")).toBe("en");
+    }
+  });
+
+  it("does not mistake hl=en inside another parameter's value for the locale", () => {
+    const url = "https://www.google.com/maps/place/Test/@0,0,15z?q=hl%3Den&hl=de";
+    expect(params(englishLocaleTarget(url)).get("hl")).toBe("en");
+  });
+
+  it("leaves an English URL alone when Google's script re-added entry/g_ep", () => {
+    // Without the option, tracking params must not cost a second page load.
+    expect(
+      englishLocaleTarget("https://www.google.com/maps/place/Test/@0,0,15z?hl=en&entry=ttu&g_ep=Egoy"),
+    ).toBeNull();
+  });
+
+  it("strips entry and g_ep after a short-link redirect even when hl is already en", () => {
+    const target = englishLocaleTarget(
+      "https://www.google.com/maps/place/Test/@0,0,15z?hl=en&entry=tts&g_ep=Egoy",
+      { stripLimitedViewParams: true },
+    );
+    const p = params(target);
+    expect(p.get("hl")).toBe("en");
+    expect(p.has("entry")).toBe(false);
+    expect(p.has("g_ep")).toBe(false);
+  });
+
+  it("returns null for a short link and for unparseable input", () => {
+    expect(englishLocaleTarget("https://maps.app.goo.gl/abc123")).toBeNull();
+    expect(englishLocaleTarget("not a url")).toBeNull();
   });
 });

@@ -1,16 +1,25 @@
-import { readFile, mkdir, writeFile, rename } from "node:fs/promises";
+import { readFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { existsSync } from "node:fs";
 import { z } from "zod";
 import { createHash } from "node:crypto";
-import { isGoogleMapsUrl, parseGoogleMapsInput } from "../utils/url.js";
+import { isGoogleMapsUrl, parseGoogleMapsInput, type ParsedUrl } from "../utils/url.js";
 import { logger } from "../utils/logger.js";
 import { writeOutput } from "../output/write.js";
-import { scrapeLocation } from "../scraper/scrape-location.js";
+import { writeFileAtomic } from "../output/atomic.js";
+import {
+  scrapeLocation,
+  type ScrapeLocationOptions,
+} from "../scraper/scrape-location.js";
+import { closeAllBrowsers } from "../scraper/browser.js";
 import { withRetry } from "../core/retry.js";
+import { runWithTimeout } from "../core/timeout.js";
+import { shutdownSignal } from "../core/shutdown.js";
+import { hasUnrecoverableKind } from "../core/errors.js";
+import { safeErrorMessage } from "../core/fatal.js";
 import { RateLimiter } from "../core/rate-limiter.js";
 import { BatchProgress } from "../utils/progress.js";
-import type { SortOrder, OutputFormat } from "../core/schema.js";
+import type { SortOrder, OutputFormat, ScrapeResult } from "../core/schema.js";
 
 export interface BatchOptions {
   outputDir: string;
@@ -27,7 +36,7 @@ export interface BatchOptions {
 const BatchStateSchema = z.object({
   completed: z.array(z.string()),
 });
-type BatchState = z.infer<typeof BatchStateSchema>;
+export type BatchState = z.infer<typeof BatchStateSchema>;
 
 export async function batchCommand(
   file: string,
@@ -69,32 +78,100 @@ export async function batchCommand(
     return;
   }
 
+  const { progress, stoppedOnStuckBrowser } = await runBatchLocations(
+    remaining,
+    options,
+    { state, stateFile, signal: shutdownSignal },
+    { scrape: (parsed, signal) => scrapeLocation(parsed, scrapeOptions(options), signal) },
+  );
+
+  progress.summary();
+
+  if (progress.failedCount > 0) {
+    process.exitCode = 1;
+  }
+
+  if (stoppedOnStuckBrowser) {
+    // The stuck browser keeps the process alive; close what we can, then end.
+    await Promise.race([
+      closeAllBrowsers(),
+      new Promise((resolve) => setTimeout(resolve, STUCK_CLOSE_MS)),
+    ]);
+    // Let the summary reach a pipe (`| tee log`) before exiting.
+    await new Promise<void>((resolve) => process.stdout.write("", () => resolve()));
+    await new Promise<void>((resolve) => process.stderr.write("", () => resolve()));
+    process.exit(1);
+  }
+}
+
+/** How long to try closing a stuck browser before exiting anyway. */
+const STUCK_CLOSE_MS = 5_000;
+
+function scrapeOptions(options: BatchOptions): ScrapeLocationOptions {
+  return {
+    sort: options.sort,
+    maxReviews: options.maxReviews,
+    headless: options.headless,
+    delay: options.delay,
+  };
+}
+
+/** What `runBatchLocations` needs from the outside world. */
+export interface BatchRunDeps {
+  /**
+   * Scrape one place. Required, with no default, so a test can never fall
+   * back to the real scrape (which opens the ~/.revcli credential store).
+   * Must stop and release its browser when `signal` aborts.
+   */
+  scrape: (parsed: ParsedUrl, signal: AbortSignal) => Promise<ScrapeResult>;
+}
+
+export interface BatchRunResult {
+  progress: BatchProgress;
+  /** True when the batch stopped because a timed-out browser did not close. */
+  stoppedOnStuckBrowser: boolean;
+}
+
+/**
+ * Scrape each URL in turn, writing one output file per place and recording it
+ * in the resume state. Exported (with an injected `scrape`) for testing.
+ */
+export async function runBatchLocations(
+  remaining: string[],
+  options: BatchOptions,
+  run: {
+    state: BatchState;
+    stateFile: string;
+    /** Stops the batch (and the running scrape) when aborted – the shutdown signal. */
+    signal?: AbortSignal;
+    /** Override of SETTLE_GRACE_MS (tests). */
+    settleGraceMs?: number;
+  },
+  deps: BatchRunDeps,
+): Promise<BatchRunResult> {
+  const { state, stateFile } = run;
   const progress = new BatchProgress(remaining.length);
   const rateLimiter = new RateLimiter(options.locationDelay);
 
-  for (const url of remaining) {
+  for (const [index, url] of remaining.entries()) {
+    if (run.signal?.aborted) break;
     await rateLimiter.wait();
+    if (run.signal?.aborted) break;
 
     try {
       const parsed = parseGoogleMapsInput(url);
-      const scrapePromise = withRetry(
-        () =>
-          scrapeLocation(parsed, {
-            sort: options.sort,
-            maxReviews: options.maxReviews,
-            headless: options.headless,
-            delay: options.delay,
-          }),
-        url,
-        { maxRetries: 2 },
+      // The timeout really stops the scrape and waits until its browser is
+      // closed, so the next place never meets a browser still holding the
+      // shared profile (issue #33).
+      const result = await runWithTimeout(
+        (signal) =>
+          withRetry(() => deps.scrape(parsed, signal), url, { maxRetries: 2, signal }),
+        {
+          timeoutMs: options.locationTimeout,
+          signal: run.signal,
+          settleGraceMs: run.settleGraceMs,
+        },
       );
-      const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(
-          () => reject(new Error(`Location timeout after ${options.locationTimeout / 1000}s`)),
-          options.locationTimeout,
-        ),
-      );
-      const result = await Promise.race([scrapePromise, timeoutPromise]);
 
       const ext = options.format === "csv" ? ".csv" : ".json";
       const baseSlug = slugify(result.business.name);
@@ -105,21 +182,22 @@ export async function batchCommand(
 
       progress.success(result.business.name, result.reviews.length);
       state.completed.push(url);
-      const tmpFile = stateFile + ".tmp";
-      await writeFile(tmpFile, JSON.stringify(state, null, 2));
-      await rename(tmpFile, stateFile);
+      await writeFileAtomic(stateFile, JSON.stringify(state, null, 2));
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : String(error);
-      progress.failure(url, message);
+      // Call log removed: Playwright errors can print element markup.
+      progress.failure(url, safeErrorMessage(error));
+      if (hasUnrecoverableKind(error, "BROWSER_NOT_CLOSED")) {
+        const notStarted = remaining.slice(index + 1);
+        logger.error(
+          `Stopping the batch: a browser may still be using the profile. ${notStarted.length} location(s) not started – run again with --resume.`,
+        );
+        for (const skipped of notStarted) progress.failure(skipped, "not started");
+        return { progress, stoppedOnStuckBrowser: true };
+      }
     }
   }
 
-  progress.summary();
-
-  if (progress.failedCount > 0) {
-    process.exitCode = 1;
-  }
+  return { progress, stoppedOnStuckBrowser: false };
 }
 
 export function parseInputFile(content: string): string[] {

@@ -3,7 +3,11 @@
  * Google uses obfuscated class names that change periodically.
  * Update this file when selectors go stale.
  *
- * Last verified: 2026-09-17
+ * Last verified: 2026-11-17
+ *
+ * 2026-11-17: 'More' button is removed on click; limited view keeps the Reviews
+ * tab and blocks Sort with a sign-in dialog; account/sign-in links identified by
+ * accounts.google.com href (language-independent).
  */
 
 export const SELECTORS = {
@@ -82,4 +86,28 @@ export const SELECTORS = {
   // Material Design spinner at bottom of scroll container during lazy-loading
   // CSS animation state toggles between paused/running
   loadingIndicator: "div.lXJj5c",
+
+  // Session markers (top-right of any Google Maps page). Matched by href, not
+  // aria-label: the labels are localized ("Google Account: …" / "Konto Google: …")
+  // and the account link's label holds the user's name and email – never log
+  // it, nor Playwright errors that may echo it.
+  // Shown when Google accepts the session.
+  accountButton: 'a[href^="https://accounts.google.com/SignOutOptions"]',
+  // Shown when signed out, and also for a dead session that still has cookies.
+  signInLink: 'a[href^="https://accounts.google.com/ServiceLogin"]',
+
+  // Limited view: clicking Sort opens "Sign-in to get the best of Google Maps"
+  // instead of the sort menu.
+  signInDialog:
+    '[role="dialog"][aria-label*="sign-in" i], [role="dialog"][aria-label*="sign in" i]',
+} as const;
+
+/**
+ * Text markers, compared against lower-cased page text. The banner reads
+ * "You’re seeing a limited view of Google Maps"; the phrase skips the
+ * apostrophe (Google uses a curly one) and is longer than "limited view" so
+ * ordinary text does not match.
+ */
+export const TEXT_MARKERS = {
+  limitedViewBanner: "limited view of google maps",
 } as const;

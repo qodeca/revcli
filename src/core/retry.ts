@@ -1,13 +1,15 @@
 import { logger } from "../utils/logger.js";
-import { UnrecoverableError } from "./errors.js";
+import { UnrecoverableError, safeErrorMessage } from "./errors.js";
 
 export interface RetryOptions {
   maxRetries: number;
   baseDelayMs: number;
   maxDelayMs: number;
+  /** Once aborted: no further attempt starts and the back-off sleep ends early. */
+  signal?: AbortSignal;
 }
 
-const DEFAULT_OPTIONS: RetryOptions = {
+const DEFAULT_OPTIONS: Omit<RetryOptions, "signal"> = {
   maxRetries: 3,
   baseDelayMs: 2000,
   maxDelayMs: 30000,
@@ -23,19 +25,27 @@ export async function withRetry<T>(
   options: Partial<RetryOptions> = {},
 ): Promise<T> {
   const opts = { ...DEFAULT_OPTIONS, ...options };
+  const { signal } = opts;
   let lastError: Error | undefined;
 
   for (let attempt = 0; attempt <= opts.maxRetries; attempt++) {
+    signal?.throwIfAborted();
     try {
       return await fn();
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
 
+      // Stopped from outside (timeout, shutdown): the attempt's own error is
+      // a consequence, so report the reason and do not retry or warn.
+      signal?.throwIfAborted();
+
       if (attempt === opts.maxRetries) break;
 
-      // Don't retry on known unrecoverable errors
+      // Don't retry on known unrecoverable errors. Debug level only: the caller
+      // (top-level handler, or batch's per-location failure line) prints the
+      // message once.
       if (isUnrecoverable(lastError)) {
-        logger.error(`${label}: unrecoverable error – ${lastError.message}`);
+        logger.debug(`${label}: unrecoverable error – ${safeErrorMessage(lastError)}`);
         throw lastError;
       }
 
@@ -46,11 +56,26 @@ export async function withRetry<T>(
       logger.warn(
         `${label}: attempt ${attempt + 1}/${opts.maxRetries + 1} failed – retrying in ${Math.round(delay / 1000)}s`,
       );
-      await new Promise((resolve) => setTimeout(resolve, delay));
+      await sleep(delay, signal);
     }
   }
 
   throw lastError!;
+}
+
+/** Sleep for `ms`, ending early (rejecting with the reason) when `signal` aborts. */
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      reject(signal?.reason);
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 export function isUnrecoverable(error: Error): boolean {

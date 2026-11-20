@@ -1,6 +1,7 @@
 import type { Page } from "playwright";
 import { logger } from "../utils/logger.js";
 import { SELECTORS } from "./selectors.js";
+import { safeErrorMessage } from "../core/errors.js";
 
 // Named timeouts for the original-language toggle pass. Reduced from the old
 // 3000ms literals so a slow card does not stall the scroll-collect loop; the
@@ -10,7 +11,22 @@ const TOGGLE_CLICK_TIMEOUT_MS = 1500;
 const TOGGLE_STATE_TIMEOUT_MS = 2000;
 const ORIGINAL_TEXT_TIMEOUT_MS = 2000;
 const RESTORE_RETRY_TIMEOUT_MS = 1000;
-const EXPAND_CLICK_TIMEOUT_MS = 500;
+
+// Expand ("More") step – see expandAllReviews and docs/selector-maintenance.md §5.
+const EXPAND_CLICK_TIMEOUT_MS = 1000;
+const EXPAND_CONFIRM_TIMEOUT_MS = 1500;
+const EXPAND_MAX_PASSES = 2;
+/** Attribute that marks each pending "More" button with a per-pass token. */
+export const EXPAND_MARK_ATTR = "data-revcli-expand";
+/**
+ * Set on a review card once its review is collected, holding that review's id.
+ * Later cycles skip a card only while the mark equals the card's current id,
+ * so a card element Google reuses for another review is read again (issue #33:
+ * re-reading every card each cycle made collection slow down as it grew).
+ */
+export const COLLECTED_MARK_ATTR = "data-revcli-collected";
+/** Tokens are generated Node-side and interpolated into a selector, so pin their alphabet. */
+const EXPAND_TOKEN_RE = /^[a-z0-9-]+$/;
 
 export interface RawReview {
   reviewId: string;
@@ -25,6 +41,31 @@ export interface RawReview {
   photos: number;
   ownerResponseText: string | null;
   ownerResponseTime: string | null;
+}
+
+/**
+ * A review as read from the DOM, plus whether its card still had an
+ * unexpanded "More" button at read time (its text may be cut off).
+ */
+export type ExtractedReview = RawReview & { expandPending: boolean };
+
+/** Outcome of one `expandAllReviews` call (for debug logging). */
+export interface ExpandResult {
+  /** Click attempts across all passes. */
+  attempted: number;
+  /** Clicks confirmed by the button disappearing, hiding or reporting aria-expanded="true". */
+  expanded: number;
+  /** Review ids whose cards still have a pending "More" button after the last pass. */
+  pendingReviewIds: Set<string>;
+}
+
+/**
+ * The truncation summary shown once at the end of a scrape (message M4).
+ * Pure and exported for testability.
+ */
+export function formatTruncationWarning(count: number, total: number): string {
+  const noun = total === 1 ? "review" : "reviews";
+  return `Could not expand the full text of ${count} of ${total} collected ${noun} – their text may be cut off (ends with "…").`;
 }
 
 /** Result of reading a single review's original-language text. */
@@ -102,43 +143,191 @@ export function buildCardSelector(reviewId: string): string {
   return `${SELECTORS.reviewCard}[data-review-id="${reviewId}"]`;
 }
 
+interface ExpandScanTarget {
+  token: string | null;
+  reviewId: string | null;
+}
+
 /**
- * Expand all truncated review texts by clicking "More" buttons.
- * Chained `locator(reviewCard).locator(expandButton)` scopes the
- * comma-list to card subtrees (see tests/extractor-selectors.test.ts)
- * and returns only real matches, avoiding per-empty-card click timeouts.
+ * One in-page pass over every review card not in `skipIds`, returning the
+ * "pending" expand buttons: rendered (has client rects) and not
+ * `aria-expanded="true"`. With `stamp`, old marks are cleared first and each
+ * pending button is marked `EXPAND_MARK_ATTR="<prefix>-<n>"` so it can be
+ * clicked by identity rather than by position. The buttons are looked up with
+ * `card.querySelectorAll`, which keeps the expandButton comma-list scoped to
+ * the card subtree. This is the single "pending" predicate on the expand side
+ * (`extractReviews` inlines the same test for `expandPending`).
  */
-export async function expandAllReviews(page: Page): Promise<void> {
-  const moreButtons = page
-    .locator(SELECTORS.reviewCard)
-    .locator(SELECTORS.expandButton);
+async function scanExpandButtons(
+  page: Page,
+  opts: { skipIds: string[]; stamp: boolean; prefix: string },
+): Promise<ExpandScanTarget[]> {
+  return page.evaluate(
+    ({ cardSel, reviewIdSel, btnSel, attr, collectedAttr, prefix, stamp, skipIds }) => {
+      if (stamp) {
+        for (const el of Array.from(document.querySelectorAll(`[${attr}]`))) {
+          el.removeAttribute(attr);
+        }
+      }
+      const skip = new Set(skipIds);
+      const out: Array<{ token: string | null; reviewId: string | null }> = [];
+      let n = 0;
+      for (const card of Array.from(document.querySelectorAll(cardSel))) {
+        // Same id resolution as extractReviews, so skipIds (collected ids)
+        // and pendingReviewIds use the ids the scroller collects.
+        const reviewId =
+          card.querySelector(reviewIdSel)?.getAttribute("data-review-id") || null;
+        if (reviewId !== null && skip.has(reviewId)) continue;
+        // Already collected (and still showing the same review): skip.
+        if (reviewId !== null && card.getAttribute(collectedAttr) === reviewId) continue;
+        for (const btn of Array.from(card.querySelectorAll(btnSel))) {
+          const pending =
+            btn.getClientRects().length > 0 &&
+            btn.getAttribute("aria-expanded") !== "true";
+          if (!pending) continue;
+          let token: string | null = null;
+          if (stamp) {
+            token = `${prefix}-${n}`;
+            n += 1;
+            btn.setAttribute(attr, token);
+          }
+          out.push({ token, reviewId });
+        }
+      }
+      return out;
+    },
+    {
+      cardSel: SELECTORS.reviewCard,
+      reviewIdSel: SELECTORS.reviewId,
+      btnSel: SELECTORS.expandButton,
+      attr: EXPAND_MARK_ATTR,
+      collectedAttr: COLLECTED_MARK_ATTR,
+      prefix: opts.prefix,
+      stamp: opts.stamp,
+      skipIds: opts.skipIds,
+    },
+  );
+}
 
-  let count: number;
+/**
+ * Wait until the marked button is gone, disconnected, hidden, or reports
+ * `aria-expanded="true"` – whichever way Google acknowledges the expand.
+ * Returns false on timeout.
+ */
+async function waitForExpanded(page: Page, token: string): Promise<boolean> {
+  return page
+    .waitForFunction(
+      ({ attr, tok }) => {
+        const el = document.querySelector(`[${attr}="${tok}"]`);
+        return (
+          !el ||
+          !el.isConnected ||
+          el.getAttribute("aria-expanded") === "true" ||
+          el.getClientRects().length === 0
+        );
+      },
+      { attr: EXPAND_MARK_ATTR, tok: token },
+      { timeout: EXPAND_CONFIRM_TIMEOUT_MS },
+    )
+    .then(
+      () => true,
+      () => false,
+    );
+}
+
+/** Click one marked button and confirm the expand. False when either step fails. */
+async function clickMarked(page: Page, token: string): Promise<boolean> {
   try {
-    count = await moreButtons.count();
+    await page
+      .locator(`[${EXPAND_MARK_ATTR}="${token}"]`)
+      .click({ timeout: EXPAND_CLICK_TIMEOUT_MS });
   } catch {
-    return;
+    // Detached or re-rendered before the click landed; a later pass (or the
+    // extraction-time `expandPending` flag) accounts for the card.
+    return false;
   }
+  return waitForExpanded(page, token);
+}
 
-  for (let i = 0; i < count; i++) {
-    try {
-      await moreButtons.nth(i).click({ timeout: EXPAND_CLICK_TIMEOUT_MS });
-    } catch {
-      // Button detached, re-rendered, or already expanded
+/** Scan without failing the scrape: a navigation mid-evaluate yields no targets. */
+async function safeScan(
+  page: Page,
+  opts: { skipIds: string[]; stamp: boolean; prefix: string },
+): Promise<ExpandScanTarget[]> {
+  try {
+    return await scanExpandButtons(page, opts);
+  } catch (err) {
+    logger.debug(
+      `Expand scan failed: ${err instanceof Error ? err.message.split("\n")[0] : String(err)}`,
+    );
+    return [];
+  }
+}
+
+/**
+ * Expand truncated review and owner-response texts by clicking their "More"
+ * buttons, using mark-and-confirm (docs/selector-maintenance.md §5):
+ *
+ * 1. Scan: mark every pending button in cards not in `skipIds` with a token.
+ * 2. Click each token and confirm the button is gone, hidden or
+ *    `aria-expanded="true"`. Identity is the element itself, so Google
+ *    removing clicked buttons cannot shift which button is clicked next.
+ * 3. Up to EXPAND_MAX_PASSES passes; later passes re-mark whatever is still
+ *    pending (re-rendered cards, late buttons, failed clicks).
+ *
+ * Cards marked with COLLECTED_MARK_ATTR (already collected, same review) are
+ * always skipped, so the scroller passes no `skipIds`; a stuck button costs at
+ * most EXPAND_MAX_PASSES clicks per cycle until its card is collected and
+ * marked (again, for a card Google re-rendered). `skipIds` stays for callers
+ * that want to exclude reviews by id. The result is for
+ * logging only – the truncation warning comes from `expandPending` at
+ * extraction time.
+ */
+export async function expandAllReviews(
+  page: Page,
+  skipIds: ReadonlySet<string> = new Set(),
+): Promise<ExpandResult> {
+  const skip = [...skipIds];
+  const runId = Date.now().toString(36);
+  let attempted = 0;
+  let expanded = 0;
+
+  for (let pass = 1; pass <= EXPAND_MAX_PASSES; pass++) {
+    const prefix = `exp-${runId}-${pass}`;
+    if (!EXPAND_TOKEN_RE.test(prefix)) {
+      throw new Error(`Invalid expand token prefix: ${prefix}`);
+    }
+    const targets = await safeScan(page, { skipIds: skip, stamp: true, prefix });
+    if (targets.length === 0) break;
+    for (const { token } of targets) {
+      if (token === null) continue;
+      attempted++;
+      if (await clickMarked(page, token)) expanded++;
     }
   }
 
-  if (count > 0) {
-    logger.debug(`Expanded ${count} truncated reviews`);
+  const remaining = await safeScan(page, { skipIds: skip, stamp: false, prefix: "" });
+  const pendingReviewIds = new Set(
+    remaining.flatMap((t) => (t.reviewId === null ? [] : [t.reviewId])),
+  );
+
+  if (attempted > 0 || pendingReviewIds.size > 0) {
+    logger.debug(
+      `Expanded ${expanded}/${attempted} truncated texts (${pendingReviewIds.size} still pending)`,
+    );
   }
+  return { attempted, expanded, pendingReviewIds };
 }
 
 /**
  * Extract all currently visible reviews from the DOM in a single evaluate() call.
  * Selectors are passed as arguments to keep them centralized in selectors.ts.
+ * Each review carries `expandPending`: whether its card still had a pending
+ * "More" button (same predicate as `scanExpandButtons`) when it was read.
  */
-export async function extractReviews(page: Page): Promise<RawReview[]> {
+export async function extractReviews(page: Page): Promise<ExtractedReview[]> {
   const sel = {
+    expandButton: SELECTORS.expandButton,
     card: SELECTORS.reviewCard,
     reviewId: SELECTORS.reviewId,
     authorName: SELECTORS.authorName,
@@ -152,6 +341,7 @@ export async function extractReviews(page: Page): Promise<RawReview[]> {
     responseContainer: SELECTORS.ownerResponseContainer,
     responseText: SELECTORS.ownerResponseText,
     responseTime: SELECTORS.ownerResponseTime,
+    collectedAttr: COLLECTED_MARK_ATTR,
   };
 
   const results = await page.evaluate((s) => {
@@ -167,6 +357,7 @@ export async function extractReviews(page: Page): Promise<RawReview[]> {
       photos: number;
       ownerResponseText: string | null;
       ownerResponseTime: string | null;
+      expandPending: boolean;
     }> = [];
 
     const reviewCards = document.querySelectorAll(s.card);
@@ -175,6 +366,8 @@ export async function extractReviews(page: Page): Promise<RawReview[]> {
       try {
         const reviewIdEl = card.querySelector(s.reviewId);
         const reviewId = reviewIdEl?.getAttribute("data-review-id") ?? "";
+        // Collected in an earlier cycle and still the same review: skip it.
+        if (reviewId && card.getAttribute(s.collectedAttr) === reviewId) continue;
 
         const authorEl = card.querySelector(s.authorName);
         const author = authorEl?.textContent?.trim() ?? "Anonymous";
@@ -223,6 +416,15 @@ export async function extractReviews(page: Page): Promise<RawReview[]> {
             responseTimeEl?.textContent?.trim() || null;
         }
 
+        // Same "pending" predicate as scanExpandButtons (closures cannot share code).
+        const expandPending = Array.from(
+          card.querySelectorAll(s.expandButton),
+        ).some(
+          (btn) =>
+            btn.getClientRects().length > 0 &&
+            btn.getAttribute("aria-expanded") !== "true",
+        );
+
         if (reviewId) {
           out.push({
             reviewId,
@@ -236,6 +438,7 @@ export async function extractReviews(page: Page): Promise<RawReview[]> {
             photos,
             ownerResponseText,
             ownerResponseTime,
+            expandPending,
           });
         }
       } catch {
@@ -247,7 +450,7 @@ export async function extractReviews(page: Page): Promise<RawReview[]> {
   }, sel);
 
   // Resolve the original language from the raw button text on the Node side.
-  const reviews: RawReview[] = results.map((r) => ({
+  const reviews: ExtractedReview[] = results.map((r) => ({
     reviewId: r.reviewId,
     author: r.author,
     authorUrl: r.authorUrl,
@@ -262,6 +465,7 @@ export async function extractReviews(page: Page): Promise<RawReview[]> {
     photos: r.photos,
     ownerResponseText: r.ownerResponseText,
     ownerResponseTime: r.ownerResponseTime,
+    expandPending: r.expandPending,
   }));
 
   // Warn about potential selector staleness
@@ -286,8 +490,39 @@ export async function extractReviews(page: Page): Promise<RawReview[]> {
     );
   }
 
-  logger.debug(`Extracted ${reviews.length} reviews from DOM`);
+  logger.debug(`Extracted ${reviews.length} not-yet-collected reviews from DOM`);
   return reviews;
+}
+
+/**
+ * Mark the cards of the given (collected) reviews with COLLECTED_MARK_ATTR so
+ * later cycles skip them. One in-page pass; ids are compared in the page, never
+ * built into a selector. Best-effort: a failed mark only means the card is
+ * read (and deduplicated) once more.
+ */
+export async function markCollected(page: Page, reviewIds: string[]): Promise<void> {
+  if (reviewIds.length === 0) return;
+  try {
+    await page.evaluate(
+      ({ cardSel, reviewIdSel, attr, ids }) => {
+        const wanted = new Set(ids);
+        for (const card of Array.from(document.querySelectorAll(cardSel))) {
+          const id = card.querySelector(reviewIdSel)?.getAttribute("data-review-id");
+          if (id && wanted.has(id) && card.getAttribute(attr) !== id) {
+            card.setAttribute(attr, id);
+          }
+        }
+      },
+      {
+        cardSel: SELECTORS.reviewCard,
+        reviewIdSel: SELECTORS.reviewId,
+        attr: COLLECTED_MARK_ATTR,
+        ids: reviewIds,
+      },
+    );
+  } catch (err) {
+    logger.debug(`Marking collected cards failed: ${safeErrorMessage(err)}`);
+  }
 }
 
 /**
